@@ -6,6 +6,7 @@ import {
   AlertCircle,
   CalendarClock,
   Loader2,
+  RefreshCcw,
   Search,
   ShieldQuestion,
   UserCircle2,
@@ -26,11 +27,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import type {
   CharacterDetailsResponse,
+  CharacterSectionMap,
+  CharacterSectionKey,
   MapleCharacterBasic,
   MapleCharacterEquipment,
   MapleCharacterSkillSet,
   MapleCharacterStat,
-  MapleCharacterUnion,
+  MapleUserUnion,
   MapleEquipmentItem,
   MapleStatEntry,
 } from "@/lib/maplestory";
@@ -38,16 +41,26 @@ import type {
 type QueryVariables = {
   characterName: string;
   date?: string;
+  section?: CharacterSectionKey;
+  ocid?: string;
 };
 
 async function fetchCharacterDetailsClient({
   characterName,
   date,
+  section,
+  ocid,
 }: QueryVariables): Promise<CharacterDetailsResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("characterName", characterName);
   if (date) {
     searchParams.set("date", date);
+  }
+  if (section) {
+    searchParams.set("section", section);
+  }
+  if (ocid) {
+    searchParams.set("ocid", ocid);
   }
 
   const response = await fetch(`/api/maplestory?${searchParams.toString()}`, {
@@ -169,10 +182,7 @@ export function PlayerDashboard() {
       {mutation.isPending && <SearchLoadingState />}
 
       {mutation.data && (
-        <PlayerProfile
-          data={mutation.data}
-          isLoading={mutation.isPending}
-        />
+        <PlayerProfile data={mutation.data} isLoading={mutation.isPending} />
       )}
 
       {!mutation.data && !mutation.isPending && !errorMessage && (
@@ -223,66 +233,69 @@ interface PlayerProfileProps {
   isLoading: boolean;
 }
 
+const SECTION_ORDER: CharacterSectionKey[] = [
+  "basic",
+  "stat",
+  "equipment",
+  "skills",
+  "union",
+];
+
+const SECTION_META: Record<CharacterSectionKey, { id: string; label: string }> =
+  {
+    basic: { id: "overview", label: "基本資訊" },
+    stat: { id: "stats", label: "能力值" },
+    equipment: { id: "equipment", label: "裝備資訊" },
+    skills: { id: "skills", label: "技能" },
+    union: { id: "union", label: "聯盟" },
+  };
+
+function isKnownSectionKey(key: unknown): key is CharacterSectionKey {
+  return (
+    typeof key === "string" &&
+    SECTION_ORDER.includes(key as CharacterSectionKey)
+  );
+}
+
 function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
-  const { sections, errors, requestedDate } = data;
+  const [sections, setSections] = useState(data.sections);
+  const [sectionErrors, setSectionErrors] = useState(data.errors);
+  const [fetchedAt, setFetchedAt] = useState(data.fetchedAt);
+
+  useEffect(() => {
+    setSections(data.sections);
+    setSectionErrors(data.errors);
+    setFetchedAt(data.fetchedAt);
+  }, [data]);
+
+  const requestedDate = data.requestedDate;
 
   const tabs = useMemo(() => {
-    const collection: Array<{
-      id: string;
-      label: string;
-      render: () => JSX.Element;
-    }> = [];
+    const presentKeys = new Set<CharacterSectionKey>();
 
-    if (sections.basic) {
-      collection.push({
-        id: "overview",
-        label: "基本資訊",
-        render: () => <OverviewSection basic={sections.basic!} />,
-      });
-    }
+    SECTION_ORDER.forEach((key) => {
+      if (sections[key]) {
+        presentKeys.add(key);
+      }
+    });
 
-    if (sections.stat) {
-      collection.push({
-        id: "stats",
-        label: "能力值",
-        render: () => <StatsSection stat={sections.stat!} />,
-      });
-    }
+    sectionErrors.forEach((error) => {
+      if (isKnownSectionKey(error.key)) {
+        presentKeys.add(error.key);
+      }
+    });
 
-    if (sections.equipment) {
-      collection.push({
-        id: "equipment",
-        label: "裝備資訊",
-        render: () => <EquipmentSection equipment={sections.equipment!} />,
-      });
-    }
+    return SECTION_ORDER.filter((key) => presentKeys.has(key)).map((key) => ({
+      key,
+      ...SECTION_META[key],
+    }));
+  }, [sections, sectionErrors]);
 
-    if (sections.skills && sections.skills.length > 0) {
-      collection.push({
-        id: "skills",
-        label: "技能",
-        render: () => <SkillsSection skillSets={sections.skills!} />,
-      });
-    }
-
-    if (sections.union) {
-      collection.push({
-        id: "union",
-        label: "聯盟",
-        render: () => <UnionSection union={sections.union!} />,
-      });
-    }
-
-    return collection;
-  }, [sections]);
-
-  const [activeTab, setActiveTab] = useState<string>(
-    tabs.length > 0 ? tabs[0]!.id : "overview",
-  );
+  const [activeTab, setActiveTab] = useState<string>(SECTION_META.basic.id);
 
   useEffect(() => {
     if (tabs.length === 0) {
-      setActiveTab("overview");
+      setActiveTab(SECTION_META.basic.id);
       return;
     }
 
@@ -293,6 +306,100 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
       return tabs[0]!.id;
     });
   }, [tabs]);
+
+  const retrySectionMutation = useMutation({
+    mutationFn: fetchCharacterDetailsClient,
+    onSuccess: (response, variables) => {
+      const sectionKey = variables.section;
+      if (!sectionKey) {
+        return;
+      }
+
+      setSections((prev) => ({
+        ...prev,
+        ...response.sections,
+      }));
+
+      setSectionErrors((prev) => {
+        const remaining = prev.filter(
+          (error) => !(isKnownSectionKey(error.key) && error.key === sectionKey)
+        );
+        const updates = response.errors.filter(
+          (error) => isKnownSectionKey(error.key) && error.key === sectionKey
+        );
+        return [...remaining, ...updates];
+      });
+
+      setFetchedAt(response.fetchedAt);
+    },
+    onError: (error, variables) => {
+      const sectionKey = variables.section;
+      if (!sectionKey) {
+        return;
+      }
+
+      const message =
+        error instanceof Error ? error.message : "重新整理失敗，請稍後重試。";
+
+      setSectionErrors((prev) => {
+        const remaining = prev.filter(
+          (existing) =>
+            !(isKnownSectionKey(existing.key) && existing.key === sectionKey)
+        );
+        return [...remaining, { key: sectionKey, message }];
+      });
+    },
+  });
+
+  const retryingSection = retrySectionMutation.variables?.section;
+
+  const resolvedErrors = useMemo(() => {
+    const record: Partial<Record<CharacterSectionKey, string>> = {};
+    sectionErrors.forEach((error) => {
+      if (isKnownSectionKey(error.key)) {
+        record[error.key] = error.message;
+      }
+    });
+    return record;
+  }, [sectionErrors]);
+
+  function triggerSectionRetry(sectionKey: CharacterSectionKey) {
+    retrySectionMutation.mutate({
+      characterName: data.characterName,
+      date: requestedDate,
+      section: sectionKey,
+      ocid: data.ocid,
+    });
+  }
+
+  function renderSectionContent(sectionKey: CharacterSectionKey) {
+    const errorMessage = resolvedErrors[sectionKey];
+    const isRetrying =
+      retrySectionMutation.isPending && retryingSection === sectionKey;
+    const sectionData = sections[sectionKey];
+
+    return (
+      <div className="space-y-4">
+        {errorMessage && (
+          <SectionRetryBanner
+            message={errorMessage}
+            onRetry={() => triggerSectionRetry(sectionKey)}
+            isRetrying={isRetrying}
+          />
+        )}
+
+        {isRetrying && !sectionData ? (
+          <SectionLoadingState />
+        ) : sectionData ? (
+          <SectionBody sectionKey={sectionKey} sections={sections} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            目前沒有資料可以顯示。
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section className="space-y-6">
@@ -309,7 +416,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
             </span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <CalendarClock className="h-4 w-4" />
-              查詢時間：{new Date(data.fetchedAt).toLocaleString("zh-TW")}
+              查詢時間：{new Date(fetchedAt).toLocaleString("zh-TW")}
               {requestedDate ? `（資料日期：${requestedDate}）` : ""}
             </span>
           </CardDescription>
@@ -323,23 +430,6 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
           )}
         </CardContent>
       </Card>
-
-      {errors.length > 0 && (
-        <Alert variant="warning">
-          <ShieldQuestion className="h-4 w-4" />
-          <AlertTitle>部分區塊載入失敗</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc space-y-1 pl-4">
-              {errors.map((error) => (
-                <li key={error.key}>
-                  <span className="font-medium">{error.key}：</span>
-                  {error.message}
-                </li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
 
       {tabs.length === 0 ? (
         <Card className="border-dashed">
@@ -359,7 +449,9 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
           {tabs.map((tab) => (
             <TabsContent key={tab.id} value={tab.id}>
               <Card>
-                <CardContent className="pt-6">{tab.render()}</CardContent>
+                <CardContent className="pt-6">
+                  {renderSectionContent(tab.key)}
+                </CardContent>
               </Card>
             </TabsContent>
           ))}
@@ -367,6 +459,80 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
       )}
     </section>
   );
+}
+
+function SectionRetryBanner({
+  message,
+  onRetry,
+  isRetrying,
+}: {
+  message: string;
+  onRetry: () => void;
+  isRetrying: boolean;
+}) {
+  return (
+    <Alert variant="warning">
+      <ShieldQuestion className="h-4 w-4" />
+      <AlertTitle>區塊載入失敗</AlertTitle>
+      <AlertDescription className="space-y-3 text-foreground">
+        <p>{message}</p>
+        <Button
+          type="button"
+          variant="outline"
+          className="inline-flex items-center gap-2"
+          onClick={onRetry}
+          disabled={isRetrying}
+        >
+          {isRetrying ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCcw className="h-4 w-4" />
+          )}
+          重新整理
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function SectionLoadingState() {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      重新整理中…
+    </div>
+  );
+}
+
+function SectionBody({
+  sectionKey,
+  sections,
+}: {
+  sectionKey: CharacterSectionKey;
+  sections: CharacterSectionMap;
+}) {
+  switch (sectionKey) {
+    case "basic":
+      return <OverviewSection basic={sections.basic as MapleCharacterBasic} />;
+    case "stat":
+      return <StatsSection stat={sections.stat as MapleCharacterStat} />;
+    case "equipment":
+      return (
+        <EquipmentSection
+          equipment={sections.equipment as MapleCharacterEquipment}
+        />
+      );
+    case "skills":
+      return (
+        <SkillsSection
+          skillSets={sections.skills as MapleCharacterSkillSet[]}
+        />
+      );
+    case "union":
+      return <UnionSection union={sections.union as MapleUserUnion} />;
+    default:
+      return <p className="text-sm text-muted-foreground">目前沒有資料。</p>;
+  }
 }
 
 function OverviewSection({ basic }: { basic: MapleCharacterBasic }) {
@@ -458,7 +624,11 @@ function StatCard({ entry }: { entry: MapleStatEntry }) {
   );
 }
 
-function EquipmentSection({ equipment }: { equipment: MapleCharacterEquipment }) {
+function EquipmentSection({
+  equipment,
+}: {
+  equipment: MapleCharacterEquipment;
+}) {
   const items = equipment.item_equipment ?? [];
 
   if (items.length === 0) {
@@ -477,7 +647,10 @@ function EquipmentSection({ equipment }: { equipment: MapleCharacterEquipment })
       )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
-          <EquipmentCard key={`${item.slot_name}-${item.item_name}`} item={item} />
+          <EquipmentCard
+            key={`${item.slot_name}-${item.item_name}`}
+            item={item}
+          />
         ))}
       </div>
     </div>
@@ -658,14 +831,14 @@ function translateSkillGrade(grade: string): string {
   return mapping[grade] ?? grade;
 }
 
-function UnionSection({ union }: { union: MapleCharacterUnion }) {
+function UnionSection({ union }: { union: MapleUserUnion }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <InfoTile label="聯盟等級" value={union.union_level} />
       <InfoTile label="聯盟階級" value={union.union_grade} />
-      <InfoTile label="聯盟戰力" value={union.union_attack_power} />
-      <InfoTile label="神器等級" value={union.artifact_level} />
-      <InfoTile label="神器經驗值" value={union.artifact_exp} />
+      <InfoTile label="持有的神器點數" value={union.union_artifact_point} />
+      <InfoTile label="神器等級" value={union.union_artifact_level} />
+      <InfoTile label="神器經驗值" value={union.union_artifact_exp} />
       <InfoTile label="資料日期" value={union.date} />
     </div>
   );

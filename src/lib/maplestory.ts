@@ -57,13 +57,14 @@ export interface MapleCharacterEquipment {
   } | null;
 }
 
-export interface MapleCharacterUnion {
+export interface MapleUserUnion {
   date?: string;
   union_level?: number;
   union_grade?: string;
   union_attack_power?: number;
-  artifact_level?: number;
-  artifact_exp?: number;
+  union_artifact_level: number;
+  union_artifact_exp: number;
+  union_artifact_point: number;
 }
 
 export interface MapleCharacterSkill {
@@ -93,7 +94,7 @@ export interface CharacterSectionMap {
   stat?: MapleCharacterStat;
   equipment?: MapleCharacterEquipment;
   skills?: MapleCharacterSkillSet[];
-  union?: MapleCharacterUnion;
+  union?: MapleUserUnion;
   [key: string]: unknown;
 }
 
@@ -130,17 +131,50 @@ const SKILL_GRADES = [
   "hyperactive",
 ];
 
+const ALL_SECTION_KEYS: ReadonlyArray<CharacterSectionKey> = [
+  "basic",
+  "stat",
+  "equipment",
+  "skills",
+  "union",
+] as const;
+
+type SectionFetcher<Key extends CharacterSectionKey> = (context: {
+  ocid: string;
+  date?: string;
+}) => Promise<NonNullable<CharacterSectionMap[Key]>>;
+
+const SECTION_FETCHERS: {
+  [Key in CharacterSectionKey]: SectionFetcher<Key>;
+} = {
+  basic: async ({ ocid, date }) =>
+    fetchFromApi<MapleCharacterBasic>("/character/basic", { ocid, date }),
+  stat: async ({ ocid, date }) =>
+    fetchFromApi<MapleCharacterStat>("/character/stat", { ocid, date }),
+  equipment: async ({ ocid, date }) =>
+    fetchFromApi<MapleCharacterEquipment>("/character/item-equipment", {
+      ocid,
+      date,
+    }),
+  union: async ({ ocid, date }) =>
+    fetchFromApi<MapleUserUnion>("/user/union", { ocid, date }),
+  skills: async ({ ocid, date }) => fetchSkills(ocid, date),
+};
+
 function ensureApiKey(): string {
   const key = process.env.NEXON_OPEN_API_KEY;
   if (!key) {
     throw new MapleStoryAPIError(
-      "Missing Nexon Open API key. Set NEXON_OPEN_API_KEY in your environment.",
+      "Missing Nexon Open API key. Set NEXON_OPEN_API_KEY in your environment."
     );
   }
   return key;
 }
 
-function buildUrl(path: string, searchParams: Record<string, string | undefined>) {
+function buildUrl(
+  path: string,
+  searchParams: Record<string, string | undefined>
+) {
   const url = new URL(`${API_BASE_URL}${path}`);
   Object.entries(searchParams).forEach(([param, value]) => {
     if (value) {
@@ -152,7 +186,7 @@ function buildUrl(path: string, searchParams: Record<string, string | undefined>
 
 async function fetchFromApi<T>(
   path: string,
-  searchParams: Record<string, string | undefined>,
+  searchParams: Record<string, string | undefined>
 ): Promise<T> {
   const apiKey = ensureApiKey();
   const url = buildUrl(path, searchParams);
@@ -186,7 +220,7 @@ async function fetchFromApi<T>(
     throw new MapleStoryAPIError(
       `Request to ${path} failed with status ${response.status}`,
       response.status,
-      errorDetails,
+      errorDetails
     );
   }
 
@@ -201,7 +235,7 @@ async function fetchOcid(characterName: string): Promise<string> {
   if (!data.ocid) {
     throw new MapleStoryAPIError(
       `角色「${characterName}」未找到，請確認角色名稱是否正確。`,
-      404,
+      404
     );
   }
 
@@ -215,72 +249,70 @@ function resolveRequestedDate(date?: string): string | undefined {
   return date;
 }
 
-export async function fetchCharacterDetails(
-  characterName: string,
-  options?: { date?: string },
-): Promise<CharacterDetailsResponse> {
-  const targetDate = resolveRequestedDate(options?.date);
-  const ocid = await fetchOcid(characterName);
+function resolveSectionKeys(
+  sections?: readonly CharacterSectionKey[]
+): CharacterSectionKey[] {
+  if (!sections || sections.length === 0) {
+    return [...ALL_SECTION_KEYS];
+  }
+  return Array.from(new Set(sections));
+}
+
+async function fetchSectionsForOcid(
+  ocid: string,
+  sectionKeys: readonly CharacterSectionKey[],
+  date?: string
+): Promise<{
+  sections: CharacterSectionMap;
+  errors: CharacterDetailsResponse["errors"];
+}> {
+  const sectionResults: Partial<
+    Record<CharacterSectionKey, CharacterSectionMap[CharacterSectionKey]>
+  > = {};
+  if (sectionKeys.length === 0) {
+    return { sections: sectionResults as CharacterSectionMap, errors: [] };
+  }
+
+  const results = await Promise.allSettled(
+    sectionKeys.map((key) => SECTION_FETCHERS[key]({ ocid, date }))
+  );
+
   const errors: CharacterDetailsResponse["errors"] = [];
 
-  const [basicResult, statResult, equipmentResult, unionResult, skillsResult] =
-    await Promise.allSettled([
-      fetchFromApi<MapleCharacterBasic>("/character/basic", { ocid, date: targetDate }),
-      fetchFromApi<MapleCharacterStat>("/character/stat", { ocid, date: targetDate }),
-      fetchFromApi<MapleCharacterEquipment>("/character/item-equipment", {
-        ocid,
-        date: targetDate,
-      }),
-      fetchFromApi<MapleCharacterUnion>("/character/union", { ocid, date: targetDate }),
-      fetchSkills(ocid, targetDate),
-    ]);
+  results.forEach((result, index) => {
+    const key = sectionKeys[index]!;
+    if (result.status === "fulfilled") {
+      sectionResults[key] =
+        result.value as CharacterSectionMap[CharacterSectionKey];
+    } else {
+      errors.push({
+        key,
+        message: normalizeErrorMessage(result.reason),
+      });
+    }
+  });
 
-  const sections: CharacterSectionMap = {};
+  return { sections: sectionResults as CharacterSectionMap, errors };
+}
 
-  if (basicResult.status === "fulfilled") {
-    sections.basic = basicResult.value;
-  } else {
-    errors.push({
-      key: "basic",
-      message: normalizeErrorMessage(basicResult.reason),
-    });
-  }
+export interface FetchCharacterDetailsOptions {
+  date?: string;
+  sections?: readonly CharacterSectionKey[];
+  ocid?: string;
+}
 
-  if (statResult.status === "fulfilled") {
-    sections.stat = statResult.value;
-  } else {
-    errors.push({
-      key: "stat",
-      message: normalizeErrorMessage(statResult.reason),
-    });
-  }
-
-  if (equipmentResult.status === "fulfilled") {
-    sections.equipment = equipmentResult.value;
-  } else {
-    errors.push({
-      key: "equipment",
-      message: normalizeErrorMessage(equipmentResult.reason),
-    });
-  }
-
-  if (unionResult.status === "fulfilled") {
-    sections.union = unionResult.value;
-  } else {
-    errors.push({
-      key: "union",
-      message: normalizeErrorMessage(unionResult.reason),
-    });
-  }
-
-  if (skillsResult.status === "fulfilled") {
-    sections.skills = skillsResult.value.filter((skillSet) => skillSet.character_skill.length > 0);
-  } else {
-    errors.push({
-      key: "skills",
-      message: normalizeErrorMessage(skillsResult.reason),
-    });
-  }
+export async function fetchCharacterDetails(
+  characterName: string,
+  options?: FetchCharacterDetailsOptions
+): Promise<CharacterDetailsResponse> {
+  const targetDate = resolveRequestedDate(options?.date);
+  const sectionKeys = resolveSectionKeys(options?.sections);
+  const ocid = options?.ocid ?? (await fetchOcid(characterName));
+  const { sections, errors } = await fetchSectionsForOcid(
+    ocid,
+    sectionKeys,
+    targetDate
+  );
 
   return {
     characterName,
@@ -292,9 +324,26 @@ export async function fetchCharacterDetails(
   };
 }
 
+export interface FetchCharacterSectionOptions {
+  characterName: string;
+  section: CharacterSectionKey;
+  date?: string;
+  ocid?: string;
+}
+
+export async function fetchCharacterSection(
+  options: FetchCharacterSectionOptions
+): Promise<CharacterDetailsResponse> {
+  return fetchCharacterDetails(options.characterName, {
+    date: options.date,
+    sections: [options.section],
+    ocid: options.ocid,
+  });
+}
+
 async function fetchSkills(
   ocid: string,
-  date?: string,
+  date?: string
 ): Promise<MapleCharacterSkillSet[]> {
   const results = await Promise.allSettled(
     SKILL_GRADES.map((grade) =>
@@ -302,13 +351,13 @@ async function fetchSkills(
         ocid,
         date,
         character_skill_grade: grade,
-      }),
-    ),
+      })
+    )
   );
 
   const skillSets: MapleCharacterSkillSet[] = [];
 
-  results.forEach((result, index) => {
+  results.forEach((result) => {
     if (result.status === "fulfilled") {
       skillSets.push(result.value);
     } else if (result.reason instanceof MapleStoryAPIError) {
@@ -319,13 +368,18 @@ async function fetchSkills(
     }
   });
 
-  return skillSets;
+  return skillSets.filter((skillSet) => skillSet.character_skill.length > 0);
 }
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof MapleStoryAPIError) {
-    if (typeof error.details === "object" && error.details && "error" in error.details) {
-      const detail = (error.details as { error?: { message?: string } }).error?.message;
+    if (
+      typeof error.details === "object" &&
+      error.details &&
+      "error" in error.details
+    ) {
+      const detail = (error.details as { error?: { message?: string } }).error
+        ?.message;
       if (detail) {
         return detail;
       }
