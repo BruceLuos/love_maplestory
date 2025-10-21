@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## 簡介
 
-## Getting Started
+這個專案整合了 Nexon Open API（冒險島台服）並提供角色搜尋與資料展示，包括基本資訊、能力值、裝備、技能與聯盟等常用面板。前端採用 React Query 管理資料請求，介面元件以 shadcn/ui（Radix + Tailwind）打造。
 
-First, run the development server:
+## 環境變數
+
+取得 Nexon Open API 金鑰後，新增 `.env.local`（或任何支援的環境設定檔）並加入：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXON_OPEN_API_KEY=your_api_key_here
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+> 注意：金鑰必須向 Nexon 開放平臺申請，且查詢次數會受官方配額限制。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 本地開發
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+安裝相依套件並啟動開發伺服器：
 
-## Learn More
+```bash
+pnpm install
+pnpm dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+開啟 [http://localhost:3000](http://localhost:3000) 進行預覽。輸入角色名稱即可從 API 擷取資料；若當天資料尚未更新，可改查詢前一日日期。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 主要功能
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- 角色基本資訊與角色圖像
+- 能力值最終面板（含剩餘 AP）
+- 裝備清單（含星力、潛能與附加潛能摘要）
+- 技能面板（自動依職業轉職階段與超技分類）
+- 冒險島聯盟摘要
+- 友善錯誤提示（例如 API 尚未更新或角色名稱錯誤）與局部載入失敗標示
+- React Query 快取與 DevTools，減少重複查詢並方便除錯
+- shadcn/ui 元件庫打造的響應式儀表板介面
 
-## Deploy on Vercel
+## 部署
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+部署到雲端前，記得在環境設定中加入 `NEXON_OPEN_API_KEY`。框架採用 Next.js 15，可直接部署至 Vercel 或任何支援 Node.js 的平臺。
