@@ -113,7 +113,7 @@ export function PlayerDashboard() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-2xl">
+          <CardTitle className="flex items-center gap-2 text-xl sm:text-2xl">
             <Search className="h-6 w-6 text-primary" />
             冒險島玩家資料中心
           </CardTitle>
@@ -405,7 +405,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     <section className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex flex-wrap items-center gap-2 text-2xl">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
             <UserCircle2 className="h-6 w-6 text-primary" />
             {sections.basic?.character_name ?? data.characterName}
           </CardTitle>
@@ -421,8 +421,8 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
             </span>
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-          <span className="font-mono">OCID：{data.ocid}</span>
+        <CardContent className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 sm:text-xs">
+          <span className="break-all font-mono">OCID：{data.ocid}</span>
           {sections.basic?.date && (
             <span className="font-mono">
               基礎資料時間：{sections.basic.date}
@@ -439,13 +439,15 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         </Card>
       ) : (
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-4 flex w-full flex-wrap justify-start gap-2">
-            {tabs.map((tab) => (
-              <TabsTrigger key={tab.id} value={tab.id}>
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="overflow-x-auto">
+            <TabsList className="min-w-max gap-2 sm:min-w-0 sm:w-full">
+              {tabs.map((tab) => (
+                <TabsTrigger key={tab.id} value={tab.id}>
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
           {tabs.map((tab) => (
             <TabsContent key={tab.id} value={tab.id}>
               <Card>
@@ -543,11 +545,11 @@ function OverviewSection({ basic }: { basic: MapleCharacterBasic }) {
           <img
             src={basic.character_image}
             alt={`${basic.character_name} 角色圖像`}
-            className="h-64 w-auto rounded-lg border border-border bg-background object-contain"
+            className="h-52 w-auto rounded-lg border border-border bg-background object-contain sm:h-64"
             loading="lazy"
           />
         ) : (
-          <div className="flex h-64 w-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+          <div className="flex h-52 w-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
             無角色圖像
           </div>
         )}
