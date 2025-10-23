@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   CalendarClock,
@@ -84,8 +84,36 @@ export function PlayerDashboard() {
   const [date, setDate] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: fetchCharacterDetailsClient,
+  const queryClient = useQueryClient();
+  const [queryVariables, setQueryVariables] = useState<QueryVariables | null>(
+    null
+  );
+
+  const characterQueryKey = useMemo(
+    () =>
+      queryVariables
+        ? ([
+            "characterDetails",
+            queryVariables.characterName,
+            queryVariables.date ?? null,
+          ] as const)
+        : null,
+    [queryVariables]
+  );
+
+  const characterQuery = useQuery<CharacterDetailsResponse>({
+    queryKey: characterQueryKey ?? ["characterDetails"],
+    queryFn: () => {
+      if (!characterQueryKey) {
+        throw new Error("缺少查詢條件");
+      }
+      const [, name, dateValue] = characterQueryKey;
+      return fetchCharacterDetailsClient({
+        characterName: name,
+        date: dateValue ?? undefined,
+      });
+    },
+    enabled: Boolean(characterQueryKey),
   });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -97,17 +125,29 @@ export function PlayerDashboard() {
     }
 
     setFormError(null);
-    mutation.mutate({
+    const normalizedDate = date.trim() || undefined;
+    const newQueryKey = [
+      "characterDetails",
+      trimmedName,
+      normalizedDate ?? null,
+    ] as const;
+
+    queryClient.invalidateQueries({ queryKey: newQueryKey });
+
+    setQueryVariables({
       characterName: trimmedName,
-      date: date.trim() || undefined,
+      date: normalizedDate,
     });
   }
 
-  const errorMessage =
-    formError ??
-    (mutation.isError && !mutation.isPending
-      ? (mutation.error as Error).message
-      : null);
+  const serverError =
+    characterQuery.isError && !characterQuery.isFetching
+      ? characterQuery.error instanceof Error
+        ? characterQuery.error.message
+        : "查詢失敗，請稍後再試。"
+      : null;
+
+  const errorMessage = formError ?? serverError;
 
   return (
     <div className="space-y-6">
@@ -156,9 +196,9 @@ export function PlayerDashboard() {
               <Button
                 type="submit"
                 className="w-full md:w-auto"
-                disabled={mutation.isPending}
+                disabled={characterQuery.isFetching}
               >
-                {mutation.isPending && (
+                {characterQuery.isFetching && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
                 查詢
@@ -179,13 +219,16 @@ export function PlayerDashboard() {
         </Alert>
       )}
 
-      {mutation.isPending && <SearchLoadingState />}
+      {characterQuery.isFetching && !characterQuery.data && <SearchLoadingState />}
 
-      {mutation.data && (
-        <PlayerProfile data={mutation.data} isLoading={mutation.isPending} />
+      {characterQuery.data && (
+        <PlayerProfile
+          data={characterQuery.data}
+          isLoading={characterQuery.isFetching}
+        />
       )}
 
-      {!mutation.data && !mutation.isPending && !errorMessage && (
+      {!characterQuery.data && !characterQuery.isFetching && !errorMessage && (
         <Card className="border-dashed">
           <CardHeader>
             <CardTitle>立即開始</CardTitle>
@@ -259,8 +302,20 @@ function isKnownSectionKey(key: unknown): key is CharacterSectionKey {
 
 function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
   const [sections, setSections] = useState(data.sections);
-  const [sectionErrors, setSectionErrors] = useState(data.errors);
+  const [sectionErrors, setSectionErrors] = useState<CharacterDetailsResponse["errors"]>(
+    data.errors
+  );
   const [fetchedAt, setFetchedAt] = useState(data.fetchedAt);
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(
+    () =>
+      ([
+        "characterDetails",
+        data.characterName,
+        data.requestedDate ?? null,
+      ] as const),
+    [data.characterName, data.requestedDate]
+  );
 
   useEffect(() => {
     setSections(data.sections);
@@ -331,6 +386,29 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
       });
 
       setFetchedAt(response.fetchedAt);
+
+      queryClient.setQueryData<CharacterDetailsResponse>(queryKey, (cached) => {
+        if (!cached) {
+          return response;
+        }
+
+        const cachedRemaining = cached.errors.filter(
+          (error) => !(isKnownSectionKey(error.key) && error.key === sectionKey)
+        );
+        const cachedUpdates = response.errors.filter(
+          (error) => isKnownSectionKey(error.key) && error.key === sectionKey
+        );
+
+        return {
+          ...cached,
+          sections: {
+            ...cached.sections,
+            ...response.sections,
+          },
+          errors: [...cachedRemaining, ...cachedUpdates],
+          fetchedAt: response.fetchedAt,
+        };
+      });
     },
     onError: (error, variables) => {
       const sectionKey = variables.section;
@@ -347,6 +425,22 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
             !(isKnownSectionKey(existing.key) && existing.key === sectionKey)
         );
         return [...remaining, { key: sectionKey, message }];
+      });
+
+      queryClient.setQueryData<CharacterDetailsResponse>(queryKey, (cached) => {
+        if (!cached) {
+          return cached;
+        }
+
+        const cachedRemaining = cached.errors.filter(
+          (existing) =>
+            !(isKnownSectionKey(existing.key) && existing.key === sectionKey)
+        );
+
+        return {
+          ...cached,
+          errors: [...cachedRemaining, { key: sectionKey, message }],
+        };
       });
     },
   });

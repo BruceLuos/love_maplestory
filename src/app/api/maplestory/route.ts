@@ -5,7 +5,10 @@ import {
   fetchCharacterSection,
   MapleStoryAPIError,
 } from "@/lib/maplestory";
-import type { CharacterSectionKey } from "@/lib/maplestory";
+import type {
+  CharacterDetailsResponse,
+  CharacterSectionKey,
+} from "@/lib/maplestory";
 
 const SECTION_KEYS: CharacterSectionKey[] = [
   "basic",
@@ -14,6 +17,67 @@ const SECTION_KEYS: CharacterSectionKey[] = [
   "skills",
   "union",
 ];
+
+type CacheKeyContext = {
+  characterName: string;
+  date?: string;
+  section?: CharacterSectionKey;
+  ocid?: string;
+};
+
+type CacheEntry = {
+  expiresAt: number;
+  payload: CharacterDetailsResponse;
+};
+
+const cache = new Map<string, CacheEntry>();
+
+const cacheTtlMs = Math.max(
+  0,
+  Number(process.env.MAPLESTORY_API_CACHE_TTL ?? 30_000)
+);
+
+function getCacheKey(context: CacheKeyContext): string | null {
+  if (cacheTtlMs === 0) {
+    return null;
+  }
+
+  return JSON.stringify([
+    context.characterName,
+    context.date ?? null,
+    context.section ?? null,
+    context.ocid ?? null,
+  ]);
+}
+
+function getFromCache(key: string | null): CharacterDetailsResponse | null {
+  if (!key) {
+    return null;
+  }
+
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  return entry.payload;
+}
+
+function setCache(key: string | null, payload: CharacterDetailsResponse) {
+  if (!key || cacheTtlMs === 0) {
+    return;
+  }
+
+  cache.set(key, {
+    payload,
+    expiresAt: Date.now() + cacheTtlMs,
+  });
+}
 
 function isSectionKey(value: string | null): value is CharacterSectionKey {
   return Boolean(value && SECTION_KEYS.includes(value as CharacterSectionKey));
@@ -35,13 +99,27 @@ export async function GET(request: Request) {
 
   const section = sectionParam ? (sectionParam as CharacterSectionKey) : undefined;
 
-  console.log("character", characterName);
-
   if (!characterName) {
     return NextResponse.json(
       { error: { message: "Missing characterName query parameter." } },
       { status: 400 }
     );
+  }
+
+  const cacheKey = getCacheKey({
+    characterName,
+    date,
+    section,
+    ocid,
+  });
+
+  const cached = getFromCache(cacheKey);
+  if (cached) {
+    return NextResponse.json(cached, {
+      headers: {
+        "x-maplestory-cache": "HIT",
+      },
+    });
   }
 
   try {
@@ -52,7 +130,10 @@ export async function GET(request: Request) {
           date,
           ocid,
         })
-      : await fetchCharacterDetails(characterName, { date });
+      : await fetchCharacterDetails(characterName, { date, ocid });
+
+    setCache(cacheKey, data);
+
     return NextResponse.json(data);
   } catch (error) {
     if (error instanceof MapleStoryAPIError) {
