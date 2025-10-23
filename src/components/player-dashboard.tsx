@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -111,6 +111,7 @@ export function PlayerDashboard() {
       return fetchCharacterDetailsClient({
         characterName: name,
         date: dateValue ?? undefined,
+        section: "basic",
       });
     },
     enabled: Boolean(characterQueryKey),
@@ -325,26 +326,18 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
 
   const requestedDate = data.requestedDate;
 
-  const tabs = useMemo(() => {
-    const presentKeys = new Set<CharacterSectionKey>();
+  const tabs = useMemo(
+    () => SECTION_ORDER.map((key) => ({ key, ...SECTION_META[key] })),
+    []
+  );
 
+  const tabIdToSectionKey = useMemo(() => {
+    const map: Record<string, CharacterSectionKey> = {};
     SECTION_ORDER.forEach((key) => {
-      if (sections[key]) {
-        presentKeys.add(key);
-      }
+      map[SECTION_META[key].id] = key;
     });
-
-    sectionErrors.forEach((error) => {
-      if (isKnownSectionKey(error.key)) {
-        presentKeys.add(error.key);
-      }
-    });
-
-    return SECTION_ORDER.filter((key) => presentKeys.has(key)).map((key) => ({
-      key,
-      ...SECTION_META[key],
-    }));
-  }, [sections, sectionErrors]);
+    return map;
+  }, []);
 
   const [activeTab, setActiveTab] = useState<string>(SECTION_META.basic.id);
 
@@ -362,8 +355,41 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     });
   }, [tabs]);
 
-  const retrySectionMutation = useMutation({
+  const [loadingSections, setLoadingSections] =
+    useState<Partial<Record<CharacterSectionKey, boolean>>>({});
+
+  const setSectionLoading = useCallback(
+    (sectionKey: CharacterSectionKey, isLoading: boolean) => {
+      setLoadingSections((prev) => {
+        const already = Boolean(prev[sectionKey]);
+        if (isLoading) {
+          if (already) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [sectionKey]: true,
+          };
+        }
+        if (!already) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[sectionKey];
+        return next;
+      });
+    },
+    []
+  );
+
+  const { mutate: mutateSection } = useMutation({
     mutationFn: fetchCharacterDetailsClient,
+    onMutate: (variables) => {
+      const sectionKey = variables.section;
+      if (sectionKey) {
+        setSectionLoading(sectionKey, true);
+      }
+    },
     onSuccess: (response, variables) => {
       const sectionKey = variables.section;
       if (!sectionKey) {
@@ -443,9 +469,13 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         };
       });
     },
+    onSettled: (_result, _error, variables) => {
+      const sectionKey = variables?.section;
+      if (sectionKey) {
+        setSectionLoading(sectionKey, false);
+      }
+    },
   });
-
-  const retryingSection = retrySectionMutation.variables?.section;
 
   const resolvedErrors = useMemo(() => {
     const record: Partial<Record<CharacterSectionKey, string>> = {};
@@ -457,19 +487,48 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     return record;
   }, [sectionErrors]);
 
-  function triggerSectionRetry(sectionKey: CharacterSectionKey) {
-    retrySectionMutation.mutate({
-      characterName: data.characterName,
-      date: requestedDate,
-      section: sectionKey,
-      ocid: data.ocid,
-    });
-  }
+  const triggerSectionRetry = useCallback(
+    (sectionKey: CharacterSectionKey) => {
+      mutateSection({
+        characterName: data.characterName,
+        date: requestedDate,
+        section: sectionKey,
+        ocid: data.ocid,
+      });
+    },
+    [
+      data.characterName,
+      mutateSection,
+      requestedDate,
+      data.ocid,
+    ]
+  );
+
+  useEffect(() => {
+    const sectionKey = tabIdToSectionKey[activeTab];
+    if (!sectionKey || sectionKey === "basic") {
+      return;
+    }
+
+    const hasData = Boolean(sections[sectionKey]);
+    const hasError = Boolean(resolvedErrors[sectionKey]);
+    const isLoading = Boolean(loadingSections[sectionKey]);
+
+    if (!hasData && !hasError && !isLoading) {
+      triggerSectionRetry(sectionKey);
+    }
+  }, [
+    activeTab,
+    tabIdToSectionKey,
+    sections,
+    resolvedErrors,
+    loadingSections,
+    triggerSectionRetry,
+  ]);
 
   function renderSectionContent(sectionKey: CharacterSectionKey) {
     const errorMessage = resolvedErrors[sectionKey];
-    const isRetrying =
-      retrySectionMutation.isPending && retryingSection === sectionKey;
+    const isRetrying = Boolean(loadingSections[sectionKey]);
     const sectionData = sections[sectionKey];
 
     return (
@@ -595,7 +654,7 @@ function SectionLoadingState() {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-      重新整理中…
+      資料載入中…
     </div>
   );
 }
