@@ -3,11 +3,14 @@ import { NextResponse } from "next/server";
 import {
   fetchCharacterDetails,
   fetchCharacterSection,
+  fetchCharacterSkillModule,
+  isSkillModuleKey,
   MapleStoryAPIError,
 } from "@/lib/maplestory";
 import type {
   CharacterDetailsResponse,
   CharacterSectionKey,
+  SkillModuleKey,
 } from "@/lib/maplestory";
 
 const SECTION_KEYS: CharacterSectionKey[] = [
@@ -23,6 +26,7 @@ type CacheKeyContext = {
   date?: string;
   section?: CharacterSectionKey;
   ocid?: string;
+  skillModule?: SkillModuleKey;
 };
 
 type CacheEntry = {
@@ -47,6 +51,7 @@ function getCacheKey(context: CacheKeyContext): string | null {
     context.date ?? null,
     context.section ?? null,
     context.ocid ?? null,
+    context.skillModule ?? null,
   ]);
 }
 
@@ -89,6 +94,7 @@ export async function GET(request: Request) {
   const date = searchParams.get("date") ?? undefined;
   const sectionParam = searchParams.get("section");
   const ocid = searchParams.get("ocid") ?? undefined;
+  const skillModuleParam = searchParams.get("skillModule");
 
   if (sectionParam && !isSectionKey(sectionParam)) {
     return NextResponse.json(
@@ -98,6 +104,9 @@ export async function GET(request: Request) {
   }
 
   const section = sectionParam ? (sectionParam as CharacterSectionKey) : undefined;
+  const skillModule = skillModuleParam
+    ? (skillModuleParam as SkillModuleKey)
+    : undefined;
 
   if (!characterName) {
     return NextResponse.json(
@@ -106,11 +115,33 @@ export async function GET(request: Request) {
     );
   }
 
+  if (skillModuleParam) {
+    if (!section || section !== "skills") {
+      return NextResponse.json(
+        {
+          error: {
+            message:
+              'The "skillModule" parameter can only be used when section=skills.',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!isSkillModuleKey(skillModuleParam)) {
+      return NextResponse.json(
+        { error: { message: `Unknown skill module "${skillModuleParam}".` } },
+        { status: 400 }
+      );
+    }
+  }
+
   const cacheKey = getCacheKey({
     characterName,
     date,
     section,
     ocid,
+    skillModule,
   });
 
   const cached = getFromCache(cacheKey);
@@ -123,14 +154,19 @@ export async function GET(request: Request) {
   }
 
   try {
-    const data = section
-      ? await fetchCharacterSection({
-          characterName,
-          section,
+    const data = skillModule
+      ? await fetchCharacterSkillModule(characterName, skillModule, {
           date,
           ocid,
         })
-      : await fetchCharacterDetails(characterName, { date, ocid });
+      : section
+        ? await fetchCharacterSection({
+            characterName,
+            section,
+            date,
+            ocid,
+          })
+        : await fetchCharacterDetails(characterName, { date, ocid });
 
     setCache(cacheKey, data);
 

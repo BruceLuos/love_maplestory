@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -29,13 +36,23 @@ import type {
   CharacterDetailsResponse,
   CharacterSectionMap,
   CharacterSectionKey,
-  MapleCharacterBasic,
   MapleCharacterEquipment,
   MapleCharacterSkillSet,
-  MapleCharacterStat,
   MapleUserUnion,
   MapleEquipmentItem,
   MapleStatEntry,
+  MapleCharacterCashEquipment,
+  MapleCashItem,
+  MapleCharacterSymbolEquipment,
+  MapleCharacterSetEffect,
+  MapleCharacterBeautyEquipment,
+  MapleCharacterAndroidEquipment,
+  MapleCharacterPetEquipment,
+  MapleCharacterLinkSkill,
+  MapleCharacterVMatrix,
+  MapleCharacterHexaMatrix,
+  MapleCharacterHexaMatrixStat,
+  SkillModuleKey,
 } from "@/lib/maplestory";
 
 type QueryVariables = {
@@ -43,13 +60,20 @@ type QueryVariables = {
   date?: string;
   section?: CharacterSectionKey;
   ocid?: string;
+  skillModule?: SkillModuleKey;
 };
+
+type BasicSectionData = NonNullable<CharacterSectionMap["basic"]>;
+type StatSectionData = NonNullable<CharacterSectionMap["stat"]>;
+type EquipmentSectionData = NonNullable<CharacterSectionMap["equipment"]>;
+type SkillsSectionData = NonNullable<CharacterSectionMap["skills"]>;
 
 async function fetchCharacterDetailsClient({
   characterName,
   date,
   section,
   ocid,
+  skillModule,
 }: QueryVariables): Promise<CharacterDetailsResponse> {
   const searchParams = new URLSearchParams();
   searchParams.set("characterName", characterName);
@@ -61,6 +85,9 @@ async function fetchCharacterDetailsClient({
   }
   if (ocid) {
     searchParams.set("ocid", ocid);
+  }
+  if (skillModule) {
+    searchParams.set("skillModule", skillModule);
   }
 
   const response = await fetch(`/api/maplestory?${searchParams.toString()}`, {
@@ -301,6 +328,23 @@ function isKnownSectionKey(key: unknown): key is CharacterSectionKey {
   );
 }
 
+function doesErrorBelongToSection(
+  errorKey: CharacterSectionKey | string,
+  sectionKey: CharacterSectionKey
+): boolean {
+  if (typeof errorKey === "string") {
+    return errorKey === sectionKey || errorKey.startsWith(`${sectionKey}.`);
+  }
+  return errorKey === sectionKey;
+}
+
+function doesErrorBelongToSkillModule(
+  errorKey: CharacterSectionKey | string,
+  moduleKey: SkillModuleKey
+): boolean {
+  return typeof errorKey === "string" && errorKey === `skills.${moduleKey}`;
+}
+
 function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
   const [sections, setSections] = useState(data.sections);
   const [sectionErrors, setSectionErrors] = useState<CharacterDetailsResponse["errors"]>(
@@ -357,6 +401,9 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
 
   const [loadingSections, setLoadingSections] =
     useState<Partial<Record<CharacterSectionKey, boolean>>>({});
+  const [loadingSkillModules, setLoadingSkillModules] = useState<
+    Partial<Record<SkillModuleKey, boolean>>
+  >({});
 
   const setSectionLoading = useCallback(
     (sectionKey: CharacterSectionKey, isLoading: boolean) => {
@@ -403,10 +450,10 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
 
       setSectionErrors((prev) => {
         const remaining = prev.filter(
-          (error) => !(isKnownSectionKey(error.key) && error.key === sectionKey)
+          (error) => !doesErrorBelongToSection(error.key, sectionKey)
         );
-        const updates = response.errors.filter(
-          (error) => isKnownSectionKey(error.key) && error.key === sectionKey
+        const updates = response.errors.filter((error) =>
+          doesErrorBelongToSection(error.key, sectionKey)
         );
         return [...remaining, ...updates];
       });
@@ -419,10 +466,10 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         }
 
         const cachedRemaining = cached.errors.filter(
-          (error) => !(isKnownSectionKey(error.key) && error.key === sectionKey)
+          (error) => !doesErrorBelongToSection(error.key, sectionKey)
         );
-        const cachedUpdates = response.errors.filter(
-          (error) => isKnownSectionKey(error.key) && error.key === sectionKey
+        const cachedUpdates = response.errors.filter((error) =>
+          doesErrorBelongToSection(error.key, sectionKey)
         );
 
         return {
@@ -447,8 +494,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
 
       setSectionErrors((prev) => {
         const remaining = prev.filter(
-          (existing) =>
-            !(isKnownSectionKey(existing.key) && existing.key === sectionKey)
+          (existing) => !doesErrorBelongToSection(existing.key, sectionKey)
         );
         return [...remaining, { key: sectionKey, message }];
       });
@@ -459,8 +505,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         }
 
         const cachedRemaining = cached.errors.filter(
-          (existing) =>
-            !(isKnownSectionKey(existing.key) && existing.key === sectionKey)
+          (existing) => !doesErrorBelongToSection(existing.key, sectionKey)
         );
 
         return {
@@ -477,12 +522,119 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     },
   });
 
+  const { mutate: mutateSkillModule } = useMutation<
+    CharacterDetailsResponse,
+    unknown,
+    SkillModuleKey
+  >({
+    mutationFn: (moduleKey) =>
+      fetchCharacterDetailsClient({
+        characterName: data.characterName,
+        date: requestedDate,
+        section: "skills",
+        ocid: data.ocid,
+        skillModule: moduleKey,
+      }),
+    onMutate: (moduleKey) => {
+      setLoadingSkillModules((prev) => {
+        if (prev[moduleKey]) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [moduleKey]: true,
+        };
+      });
+    },
+    onSuccess: (response, moduleKey) => {
+      const skillData = (response.sections.skills ?? {}) as SkillsSectionData;
+
+      setSections((prev) => {
+        const prevSkills = (prev.skills ?? {}) as SkillsSectionData;
+        return {
+          ...prev,
+          skills: {
+            ...prevSkills,
+            ...skillData,
+          },
+        };
+      });
+
+      setSectionErrors((prev) => {
+        const remaining = prev.filter(
+          (error) =>
+            !doesErrorBelongToSkillModule(error.key, moduleKey) &&
+            error.key !== "skills"
+        );
+        const updates = response.errors.filter((error) =>
+          doesErrorBelongToSkillModule(error.key, moduleKey)
+        );
+        return [...remaining, ...updates];
+      });
+
+      setFetchedAt(response.fetchedAt);
+
+      queryClient.setQueryData<CharacterDetailsResponse>(queryKey, (cached) => {
+        if (!cached) {
+          return response;
+        }
+
+        const cachedSkills = (cached.sections.skills ?? {}) as SkillsSectionData;
+
+        const updatedErrors = (() => {
+          const remaining = cached.errors.filter(
+            (error) =>
+              !doesErrorBelongToSkillModule(error.key, moduleKey) &&
+              error.key !== "skills"
+          );
+          const updates = response.errors.filter((error) =>
+            doesErrorBelongToSkillModule(error.key, moduleKey)
+          );
+          return [...remaining, ...updates];
+        })();
+
+        return {
+          ...cached,
+          sections: {
+            ...cached.sections,
+            skills: {
+              ...cachedSkills,
+              ...skillData,
+            },
+          },
+          errors: updatedErrors,
+          fetchedAt: response.fetchedAt,
+        };
+      });
+    },
+    onError: (error, moduleKey) => {
+      const message =
+        error instanceof Error ? error.message : "重新整理失敗，請稍後重試。";
+      setSectionErrors((prev) => {
+        const remaining = prev.filter(
+          (existing) => !doesErrorBelongToSkillModule(existing.key, moduleKey)
+        );
+        return [...remaining, { key: `skills.${moduleKey}`, message }];
+      });
+    },
+    onSettled: (_result, _error, moduleKey) => {
+      setLoadingSkillModules((prev) => {
+        if (!prev[moduleKey]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[moduleKey];
+        return next;
+      });
+    },
+  });
+
   const resolvedErrors = useMemo(() => {
-    const record: Partial<Record<CharacterSectionKey, string>> = {};
+    const record: Record<string, string> = {};
     sectionErrors.forEach((error) => {
-      if (isKnownSectionKey(error.key)) {
-        record[error.key] = error.message;
-      }
+      const key =
+        typeof error.key === "string" ? error.key : (error.key as string);
+      record[key] = error.message;
     });
     return record;
   }, [sectionErrors]);
@@ -511,7 +663,11 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     }
 
     const hasData = Boolean(sections[sectionKey]);
-    const hasError = Boolean(resolvedErrors[sectionKey]);
+    const hasError =
+      Boolean(resolvedErrors[sectionKey]) ||
+      Object.keys(resolvedErrors).some((errorKey) =>
+        errorKey.startsWith(`${sectionKey}.`)
+      );
     const isLoading = Boolean(loadingSections[sectionKey]);
 
     if (!hasData && !hasError && !isLoading) {
@@ -531,6 +687,12 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     const isRetrying = Boolean(loadingSections[sectionKey]);
     const sectionData = sections[sectionKey];
 
+    const hasAnyErrorForSection =
+      Boolean(errorMessage) ||
+      Object.keys(resolvedErrors).some((key) =>
+        key.startsWith(`${sectionKey}.`)
+      );
+
     return (
       <div className="space-y-4">
         {errorMessage && (
@@ -544,15 +706,27 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         {isRetrying && !sectionData ? (
           <SectionLoadingState />
         ) : sectionData ? (
-          <SectionBody sectionKey={sectionKey} sections={sections} />
+          <SectionBody
+            sectionKey={sectionKey}
+            sections={sections}
+            errors={resolvedErrors}
+            onRetry={() => triggerSectionRetry(sectionKey)}
+            isLoading={isRetrying}
+            loadingSkillModules={loadingSkillModules}
+            onRefetchSkillModule={mutateSkillModule}
+          />
         ) : (
           <p className="text-sm text-muted-foreground">
-            目前沒有資料可以顯示。
+            {hasAnyErrorForSection
+              ? "資料讀取暫時失敗，請稍後再試。"
+              : "目前沒有資料可以顯示。"}
           </p>
         )}
       </div>
     );
   }
+
+  const basicProfile = sections.basic?.profile;
 
   return (
     <section className="space-y-6">
@@ -560,12 +734,12 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
             <UserCircle2 className="h-6 w-6 text-primary" />
-            {sections.basic?.character_name ?? data.characterName}
+            {basicProfile?.character_name ?? data.characterName}
           </CardTitle>
           <CardDescription className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-4">
             <span>
-              {sections.basic?.world_name ?? "未知伺服器"} ｜{" "}
-              {sections.basic?.character_class ?? "未知職業"}
+              {basicProfile?.world_name ?? "未知伺服器"} ｜{" "}
+              {basicProfile?.character_class ?? "未知職業"}
             </span>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <CalendarClock className="h-4 w-4" />
@@ -576,9 +750,9 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         </CardHeader>
         <CardContent className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 sm:text-xs">
           <span className="break-all font-mono">OCID：{data.ocid}</span>
-          {sections.basic?.date && (
+          {basicProfile?.date && (
             <span className="font-mono">
-              基礎資料時間：{sections.basic.date}
+              基礎資料時間：{basicProfile.date}
             </span>
           )}
         </CardContent>
@@ -662,106 +836,282 @@ function SectionLoadingState() {
 function SectionBody({
   sectionKey,
   sections,
+  errors,
+  onRetry,
+  isLoading,
+  loadingSkillModules,
+  onRefetchSkillModule,
 }: {
   sectionKey: CharacterSectionKey;
   sections: CharacterSectionMap;
+  errors: Record<string, string>;
+  onRetry: () => void;
+  isLoading: boolean;
+  loadingSkillModules?: Partial<Record<SkillModuleKey, boolean>>;
+  onRefetchSkillModule?: (module: SkillModuleKey) => void;
 }) {
   switch (sectionKey) {
     case "basic":
-      return <OverviewSection basic={sections.basic as MapleCharacterBasic} />;
+      if (sections.basic) {
+        return <OverviewSection section={sections.basic as BasicSectionData} />;
+      }
+      break;
     case "stat":
-      return <StatsSection stat={sections.stat as MapleCharacterStat} />;
+      if (sections.stat) {
+        return <StatsSection section={sections.stat as StatSectionData} />;
+      }
+      break;
     case "equipment":
-      return (
-        <EquipmentSection
-          equipment={sections.equipment as MapleCharacterEquipment}
-        />
-      );
+      if (sections.equipment) {
+        return (
+          <EquipmentSection section={sections.equipment as EquipmentSectionData} />
+        );
+      }
+      break;
     case "skills":
-      return (
-        <SkillsSection
-          skillSets={sections.skills as MapleCharacterSkillSet[]}
-        />
-      );
-    case "union":
-      return <UnionSection union={sections.union as MapleUserUnion} />;
-    default:
-      return <p className="text-sm text-muted-foreground">目前沒有資料。</p>;
-  }
-}
-
-function OverviewSection({ basic }: { basic: MapleCharacterBasic }) {
-  return (
-    <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-border bg-muted/40 p-4">
-        {basic.character_image ? (
-          <img
-            src={basic.character_image}
-            alt={`${basic.character_name} 角色圖像`}
-            className="h-52 w-auto rounded-lg border border-border bg-background object-contain sm:h-64"
-            loading="lazy"
+      if (sections.skills) {
+        return (
+          <SkillsSection
+            section={sections.skills as SkillsSectionData}
+            errors={errors}
+            isLoading={isLoading}
+            loadingModules={loadingSkillModules}
+            onRefetchModule={onRefetchSkillModule}
           />
-        ) : (
-          <div className="flex h-52 w-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
-            無角色圖像
-          </div>
-        )}
-        <div className="text-center">
-          <p className="text-xl font-semibold text-foreground">
-            {basic.character_name}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {basic.world_name ?? "未知伺服器"} ｜{" "}
-            {basic.character_class ?? "未知職業"}
-          </p>
-        </div>
-      </div>
-      <dl className="grid gap-4 sm:grid-cols-2">
-        <InfoTile label="等級" value={basic.character_level} />
-        <InfoTile label="經驗值" value={basic.character_exp} />
-        <InfoTile label="經驗值比例" value={basic.character_exp_rate} />
-        <InfoTile label="所屬公會" value={basic.character_guild_name} />
-        <InfoTile label="資料日期" value={basic.date} />
-      </dl>
-    </div>
-  );
+        );
+      }
+      break;
+    case "union":
+      if (sections.union) {
+        return <UnionSection union={sections.union as MapleUserUnion} />;
+      }
+      break;
+  }
+
+  return <p className="text-sm text-muted-foreground">目前沒有資料。</p>;
 }
 
-function InfoTile({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number | undefined;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-background/80 p-4">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="mt-2 text-lg font-semibold text-foreground">
-        {value ?? "—"}
-      </dd>
-    </div>
-  );
-}
+function OverviewSection({ section }: { section: BasicSectionData }) {
+  const profile = section.profile;
 
-function StatsSection({ stat }: { stat: MapleCharacterStat }) {
-  if (!stat.final_stat || stat.final_stat.length === 0) {
-    return <p className="text-sm text-muted-foreground">暫無能力值資料。</p>;
+  if (!profile) {
+    return <p className="text-sm text-muted-foreground">暫無基本資料。</p>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {stat.final_stat.map((entry) => (
-          <StatCard key={entry.stat_name} entry={entry} />
-        ))}
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-border bg-muted/40 p-4">
+          {profile.character_image ? (
+            <img
+              src={profile.character_image}
+              alt={`${profile.character_name} 角色圖像`}
+              className="h-52 w-auto rounded-lg border border-border bg-background object-contain sm:h-64"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-52 w-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
+              無角色圖像
+            </div>
+          )}
+          <div className="text-center">
+            <p className="text-xl font-semibold text-foreground">
+              {profile.character_name}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {profile.world_name ?? "未知伺服器"} ｜{" "}
+              {profile.character_class ?? "未知職業"}
+            </p>
+          </div>
+        </div>
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <InfoTile label="等級" value={profile.character_level} />
+          <InfoTile label="經驗值" value={profile.character_exp} />
+          <InfoTile label="經驗值比例" value={profile.character_exp_rate} />
+          <InfoTile label="所屬公會" value={profile.character_guild_name} />
+          <InfoTile label="資料日期" value={profile.date} />
+          <InfoTile label="名聲值" value={section.popularity?.popularity} />
+        </dl>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <InfoTile label="剩餘 AP" value={stat.remain_ap} />
-        <InfoTile label="最小星力" value={stat.remain_minimum_star_force} />
-      </div>
+      {section.dojang && <DojangSection dojang={section.dojang} />}
+    </div>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: ReactNode }) {
+  const content =
+    value === null || value === undefined || value === "" ? "—" : value;
+
+  return (
+    <div className="rounded-xl border border-border bg-background/80 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 text-lg font-semibold text-foreground">{content}</p>
+    </div>
+  );
+}
+
+function DojangSection({
+  dojang,
+}: {
+  dojang: NonNullable<BasicSectionData["dojang"]>;
+}) {
+  const hasHighlights =
+    Boolean(dojang.dojang_best_floor) ||
+    Boolean(dojang.dojang_best_time) ||
+    Boolean(dojang.dojang_best_floor_class_rank) ||
+    Boolean(dojang.dojang_best_floor_world_rank);
+  const hasRecords = (dojang.dojang_record?.length ?? 0) > 0;
+
+  if (!hasHighlights && !hasRecords) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">
+          武陵道場紀錄
+        </h3>
+        {dojang.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{dojang.date}
+          </p>
+        )}
+      </header>
+      {hasHighlights && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <InfoTile label="最高樓層" value={dojang.dojang_best_floor} />
+          <InfoTile
+            label="最佳時間"
+            value={formatDojangTime(dojang.dojang_best_time)}
+          />
+          <InfoTile
+            label="職業排名"
+            value={dojang.dojang_best_floor_class_rank}
+          />
+          <InfoTile
+            label="世界排名"
+            value={dojang.dojang_best_floor_world_rank}
+          />
+        </div>
+      )}
+      {hasRecords && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground">
+            歷史紀錄：
+          </p>
+          <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+            {dojang.dojang_record?.slice(0, 6).map((record) => (
+              <li
+                key={`${record.floor}-${record.time_record}`}
+                className="rounded-lg border border-border/70 bg-background/80 px-3 py-2"
+              >
+                <p className="font-semibold text-foreground">
+                  第 {record.floor} 層
+                </p>
+                <p>
+                  {record.time_record_string ??
+                    formatDojangTime(record.time_record)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatDojangTime(raw?: number) {
+  if (raw === null || raw === undefined) {
+    return "—";
+  }
+  const minutes = Math.floor(raw / 60);
+  const seconds = Math.abs(Math.round(raw % 60));
+  if (minutes === 0 && seconds === 0) {
+    return "—";
+  }
+  return `${minutes}分${seconds.toString().padStart(2, "0")}秒`;
+}
+
+function StatsSection({ section }: { section: StatSectionData }) {
+  const hasOverview =
+    Boolean(section.overview?.final_stat?.length) ||
+    Boolean(section.overview?.remain_ap);
+  const hasPropensity = Boolean(section.propensity);
+  const hasHyperStat =
+    Boolean(section.hyperStat?.hyper_stat_preset_1?.length) ||
+    Boolean(section.hyperStat?.hyper_stat_preset_2?.length) ||
+    Boolean(section.hyperStat?.hyper_stat_preset_3?.length);
+  const hasAbility =
+    Boolean(section.ability?.ability_info?.length) ||
+    Boolean(section.ability?.ability_preset_1?.ability_info?.length) ||
+    Boolean(section.ability?.ability_preset_2?.ability_info?.length) ||
+    Boolean(section.ability?.ability_preset_3?.ability_info?.length);
+
+  if (!hasOverview && !hasPropensity && !hasHyperStat && !hasAbility) {
+    return <p className="text-sm text-muted-foreground">暫無能力資料。</p>;
+  }
+
+  return (
+    <div className="space-y-8">
+      {section.overview && hasOverview && (
+        <section className="space-y-4">
+          <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-lg font-semibold text-foreground">最終能力值</h3>
+            {section.overview.date && (
+              <p className="text-xs text-muted-foreground">
+                資料日期：{section.overview.date}
+              </p>
+            )}
+          </header>
+          {section.overview.final_stat && section.overview.final_stat.length > 0 && (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {section.overview.final_stat.map((entry) => (
+                <StatCard key={entry.stat_name} entry={entry} />
+              ))}
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <InfoTile label="剩餘 AP" value={section.overview.remain_ap} />
+            <InfoTile
+              label="最小星力"
+              value={section.overview.remain_minimum_star_force}
+            />
+          </div>
+        </section>
+      )}
+
+      {section.propensity && hasPropensity && (
+        <section className="space-y-3">
+          <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-lg font-semibold text-foreground">生活性向</h3>
+            {section.propensity.date && (
+              <p className="text-xs text-muted-foreground">
+                資料日期：{section.propensity.date}
+              </p>
+            )}
+          </header>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <InfoTile label="領導力" value={section.propensity.charisma_level} />
+            <InfoTile label="感性" value={section.propensity.sensibility_level} />
+            <InfoTile label="洞察力" value={section.propensity.insight_level} />
+            <InfoTile label="意志" value={section.propensity.willingness_level} />
+            <InfoTile label="手藝" value={section.propensity.handicraft_level} />
+            <InfoTile label="魅力" value={section.propensity.charm_level} />
+          </div>
+        </section>
+      )}
+
+      {section.hyperStat && hasHyperStat && (
+        <HyperStatSection hyperStat={section.hyperStat} />
+      )}
+
+      {section.ability && hasAbility && (
+        <AbilitySection ability={section.ability} />
+      )}
     </div>
   );
 }
@@ -779,24 +1129,251 @@ function StatCard({ entry }: { entry: MapleStatEntry }) {
   );
 }
 
-function EquipmentSection({
-  equipment,
+function HyperStatSection({
+  hyperStat,
 }: {
-  equipment: MapleCharacterEquipment;
+  hyperStat: NonNullable<StatSectionData["hyperStat"]>;
 }) {
-  const items = equipment.item_equipment ?? [];
+  const presets = [
+    {
+      id: "1",
+      label: "預設 1",
+      entries: hyperStat.hyper_stat_preset_1 ?? [],
+      remain: hyperStat.hyper_stat_preset_1_remain_point,
+    },
+    {
+      id: "2",
+      label: "預設 2",
+      entries: hyperStat.hyper_stat_preset_2 ?? [],
+      remain: hyperStat.hyper_stat_preset_2_remain_point,
+    },
+    {
+      id: "3",
+      label: "預設 3",
+      entries: hyperStat.hyper_stat_preset_3 ?? [],
+      remain: hyperStat.hyper_stat_preset_3_remain_point,
+    },
+  ].filter((preset) => preset.entries.length > 0);
 
-  if (items.length === 0) {
+  if (presets.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-4">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">極限屬性</h3>
+          <p className="text-xs text-muted-foreground">
+            使用預設：{hyperStat.use_preset_no ?? "-"} ｜ 可用點數上限：
+            {hyperStat.use_available_hyper_stat ?? "-"}
+          </p>
+        </div>
+        {hyperStat.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{hyperStat.date}
+          </p>
+        )}
+      </header>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {presets.map((preset) => (
+          <div
+            key={preset.id}
+            className="rounded-xl border border-border bg-background/80 p-4"
+          >
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{preset.label}</span>
+              {preset.id === hyperStat.use_preset_no && (
+                <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                  使用中
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              剩餘點數：{preset.remain ?? 0}
+            </p>
+            <ul className="mt-3 space-y-1">
+              {preset.entries.map((entry) => (
+                <li
+                  key={`${preset.id}-${entry.stat_type}`}
+                  className="flex items-center justify-between rounded border border-border/60 bg-background px-2 py-1 text-xs"
+                >
+                  <span className="font-medium text-foreground">
+                    {entry.stat_type ?? "未知能力"}
+                  </span>
+                  <span className="text-muted-foreground">
+                    Lv.{entry.stat_level ?? "-"} ({entry.stat_point ?? 0} 點)
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AbilitySection({
+  ability,
+}: {
+  ability: NonNullable<StatSectionData["ability"]>;
+}) {
+  const current = ability.ability_info ?? [];
+  const presets = [
+    { id: 1, label: "能力預設 1", data: ability.ability_preset_1 },
+    { id: 2, label: "能力預設 2", data: ability.ability_preset_2 },
+    { id: 3, label: "能力預設 3", data: ability.ability_preset_3 },
+  ].filter((preset) => preset.data?.ability_info?.length);
+
+  return (
+    <section className="space-y-4">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">角色能力</h3>
+          <p className="text-xs text-muted-foreground">
+            當前階級：{ability.ability_grade ?? "-"} ｜ 套用預設：
+            {ability.preset_no ?? "-"}
+          </p>
+        </div>
+        {ability.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{ability.date}
+          </p>
+        )}
+      </header>
+      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,1fr)]">
+        <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/10 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+            目前套用
+          </p>
+          <InfoTile label="剩餘名聲值" value={ability.remain_fame} />
+          <ul className="space-y-2 text-xs text-primary-foreground">
+            {current.length === 0 ? (
+              <li className="text-muted-foreground">尚無能力資訊。</li>
+            ) : (
+              current.map((entry) => (
+                <li
+                  key={`${entry.ability_no}-${entry.ability_value}`}
+                  className="rounded border border-primary/30 bg-background/30 px-3 py-2"
+                >
+                  <p className="font-semibold text-primary">
+                    {entry.ability_value}
+                  </p>
+                  <p className="text-[11px] uppercase tracking-wide text-primary/70">
+                    {entry.ability_grade ?? "-"}｜{entry.ability_no ?? "-"}
+                  </p>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+        {presets.length > 0 && (
+          <div className="space-y-4">
+            {presets.map((preset) => (
+              <div
+                key={preset.id}
+                className="space-y-2 rounded-xl border border-border bg-background/70 p-4"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {preset.label}（{preset.data?.ability_preset_grade ?? "-"}）
+                </p>
+                <ul className="space-y-2 text-xs text-muted-foreground">
+                  {preset.data?.ability_info?.map((entry) => (
+                    <li
+                      key={`${preset.id}-${entry.ability_no}-${entry.ability_value}`}
+                      className="rounded border border-border/60 bg-background px-3 py-2"
+                    >
+                      <p className="font-semibold text-foreground">
+                        {entry.ability_value}
+                      </p>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {entry.ability_grade ?? "-"}｜{entry.ability_no ?? "-"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EquipmentSection({
+  section,
+}: {
+  section: EquipmentSectionData;
+}) {
+  const hasGear = Boolean(section.gear?.item_equipment?.length);
+  const hasCash = Boolean(section.cash?.cash_item_equipment_base?.length);
+  const hasSymbols = Boolean(section.symbols?.symbol?.length);
+  const hasSetEffects = Boolean(section.setEffects?.set_effect?.length);
+  const hasBeauty =
+    Boolean(section.beauty?.character_hair) ||
+    Boolean(section.beauty?.character_face) ||
+    Boolean(section.beauty?.character_skin);
+  const hasAndroid =
+    Boolean(section.android?.android_name) ||
+    Boolean(section.android?.android_cash_item_equipment?.length);
+  const hasPets =
+    Boolean(section.pets?.pet_1_name) ||
+    Boolean(section.pets?.pet_2_name) ||
+    Boolean(section.pets?.pet_3_name);
+
+  if (
+    !hasGear &&
+    !hasCash &&
+    !hasSymbols &&
+    !hasSetEffects &&
+    !hasBeauty &&
+    !hasAndroid &&
+    !hasPets
+  ) {
     return <p className="text-sm text-muted-foreground">目前沒有裝備資料。</p>;
   }
 
   return (
-    <div className="space-y-5">
-      {equipment.item_title?.title_name && (
+    <div className="space-y-8">
+      {section.gear && hasGear && <GearSection gear={section.gear} />}
+      {section.cash && hasCash && <CashEquipmentSection cash={section.cash} />}
+      {section.symbols && hasSymbols && (
+        <SymbolSection symbols={section.symbols} />
+      )}
+      {section.setEffects && hasSetEffects && (
+        <SetEffectSection setEffect={section.setEffects} />
+      )}
+      {section.beauty && hasBeauty && <BeautySection beauty={section.beauty} />}
+      {section.android && hasAndroid && (
+        <AndroidSection android={section.android} />
+      )}
+      {section.pets && hasPets && <PetSection pets={section.pets} />}
+    </div>
+  );
+}
+
+function GearSection({ gear }: { gear: MapleCharacterEquipment }) {
+  const items = gear.item_equipment ?? [];
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-4">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">主要裝備</h3>
+        {gear.date && (
+          <p className="text-xs text-muted-foreground">資料日期：{gear.date}</p>
+        )}
+      </header>
+      {gear.item_title?.title_name && (
         <div className="rounded-xl border border-secondary bg-secondary/40 p-4 text-secondary-foreground">
           <p className="text-xs uppercase tracking-wide">稱號</p>
           <p className="mt-1 text-lg font-semibold">
-            {equipment.item_title.title_name}
+            {gear.item_title.title_name}
           </p>
         </div>
       )}
@@ -808,7 +1385,7 @@ function EquipmentSection({
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -862,47 +1439,483 @@ function EquipmentStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatPotential(item: MapleEquipmentItem): string {
-  const options = [
-    item.potential_option_1,
-    item.potential_option_2,
-    item.potential_option_3,
-  ].filter(Boolean);
+function CashEquipmentSection({
+  cash,
+}: {
+  cash: MapleCharacterCashEquipment;
+}) {
+  const items = cash.cash_item_equipment_base ?? [];
 
-  if (options.length === 0) {
-    return item.potential_option_grade ?? "—";
-  }
-
-  return [`${item.potential_option_grade ?? "潛能"}`, ...options].join("\n");
-}
-
-function formatAdditionalPotential(item: MapleEquipmentItem): string {
-  const options = [
-    item.additional_potential_option_1,
-    item.additional_potential_option_2,
-    item.additional_potential_option_3,
-  ].filter(Boolean);
-
-  if (options.length === 0) {
-    return item.additional_potential_option_grade ?? "—";
-  }
-
-  return [
-    `${item.additional_potential_option_grade ?? "附加潛能"}`,
-    ...options,
-  ].join("\n");
-}
-
-function SkillsSection({ skillSets }: { skillSets: MapleCharacterSkillSet[] }) {
-  if (!skillSets || skillSets.length === 0) {
-    return <p className="text-sm text-muted-foreground">目前沒有技能資料。</p>;
+  if (items.length === 0) {
+    return null;
   }
 
   return (
-    <div className="space-y-6">
-      {skillSets.map((set) => (
-        <SkillGroup key={set.character_skill_grade} skillSet={set} />
-      ))}
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">現金裝備</h3>
+        <p className="text-xs text-muted-foreground">
+          套用預設：{cash.preset_no ?? "-"}
+        </p>
+      </header>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((item, index) => (
+          <CashEquipmentCard
+            key={`${item.cash_item_equipment_slot}-${item.cash_item_name}-${index}`}
+            item={item}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CashEquipmentCard({ item }: { item: MapleCashItem }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-background/80 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            {item.cash_item_equipment_part}
+          </p>
+          <p className="text-sm font-semibold text-foreground">
+            {item.cash_item_name}
+          </p>
+        </div>
+        {item.cash_item_icon && (
+          <img
+            src={item.cash_item_icon}
+            alt={item.cash_item_name}
+            className="h-12 w-12 rounded border border-border bg-muted object-contain"
+            loading="lazy"
+          />
+        )}
+      </div>
+      {item.cash_item_option && item.cash_item_option.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {item.cash_item_option.map((option, optionIndex) => (
+            <li key={`${item.cash_item_name}-opt-${optionIndex}`}>
+              {option.option_type}：{option.option_value}
+            </li>
+          ))}
+        </ul>
+      )}
+      {item.date_expire && (
+        <p className="text-[11px] text-muted-foreground">
+          到期日：{item.date_expire}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SymbolSection({
+  symbols,
+}: {
+  symbols: MapleCharacterSymbolEquipment;
+}) {
+  const entries = symbols.symbol ?? [];
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">符文</h3>
+        {symbols.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{symbols.date}
+          </p>
+        )}
+      </header>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {entries.map((symbol) => (
+          <div
+            key={symbol.symbol_name}
+            className="space-y-2 rounded-xl border border-border bg-background/80 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {symbol.symbol_name}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Lv. {symbol.symbol_level ?? "-"} ｜ 成長值 {symbol.symbol_growth_count ?? 0}/
+                  {symbol.symbol_require_growth_count ?? 0}
+                </p>
+              </div>
+              {symbol.symbol_icon && (
+                <img
+                  src={symbol.symbol_icon}
+                  alt={symbol.symbol_name}
+                  className="h-10 w-10 rounded border border-border bg-muted object-contain"
+                  loading="lazy"
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {symbol.symbol_description ?? "—"}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SetEffectSection({
+  setEffect,
+}: {
+  setEffect: MapleCharacterSetEffect;
+}) {
+  const sets = setEffect.set_effect ?? [];
+
+  if (sets.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">套裝效果</h3>
+        {setEffect.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{setEffect.date}
+          </p>
+        )}
+      </header>
+      <div className="space-y-3">
+        {sets.map((set) => (
+          <div
+            key={set.set_name}
+            className="space-y-2 rounded-xl border border-border bg-background/70 p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-foreground">
+                {set.set_name}
+              </p>
+              <span className="text-xs text-muted-foreground">
+                積累件數：{set.total_set_count ?? 0}
+              </span>
+            </div>
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {set.set_effect_info?.map((info, index) => (
+                <li key={`${set.set_name}-active-${index}`}>
+                  {info.set_count} 件：{info.set_option}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BeautySection({
+  beauty,
+}: {
+  beauty: MapleCharacterBeautyEquipment;
+}) {
+  const hasData =
+    Boolean(beauty.character_hair) ||
+    Boolean(beauty.character_face) ||
+    Boolean(beauty.character_skin);
+
+  if (!hasData) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-lg font-semibold text-foreground">外觀資訊</h3>
+        {beauty.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{beauty.date}
+          </p>
+        )}
+      </header>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <InfoTile
+          label="髮型"
+          value={beauty.character_hair?.hair_name ?? "—"}
+        />
+        <InfoTile
+          label="臉型"
+          value={beauty.character_face?.face_name ?? "—"}
+        />
+        <InfoTile
+          label="膚色"
+          value={beauty.character_skin?.skin_name ?? "—"}
+        />
+      </div>
+    </section>
+  );
+}
+
+function AndroidSection({
+  android,
+}: {
+  android: MapleCharacterAndroidEquipment;
+}) {
+  const items = android.android_cash_item_equipment ?? [];
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">機器人</h3>
+          <p className="text-sm text-muted-foreground">
+            {android.android_name ?? "未命名"}
+            {android.android_nickname ? `（${android.android_nickname}）` : ""}
+          </p>
+        </div>
+        {android.date && (
+          <p className="text-xs text-muted-foreground">
+            資料日期：{android.date}
+          </p>
+        )}
+      </header>
+      {items.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item, index) => (
+            <div
+              key={`${item.cash_item_equipment_slot}-${index}`}
+              className="space-y-2 rounded-xl border border-border bg-background/80 p-4"
+            >
+              <p className="text-sm font-semibold text-foreground">
+                {item.cash_item_name}
+              </p>
+              {item.cash_item_option && (
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {item.cash_item_option.map((option, optIndex) => (
+                    <li key={`${item.cash_item_name}-opt-${optIndex}`}>
+                      {option.option_type}：{option.option_value}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PetSection({ pets }: { pets: MapleCharacterPetEquipment }) {
+  const entries = [
+    {
+      name: pets.pet_1_name,
+      nickname: pets.pet_1_nickname,
+      icon: pets.pet_1_icon,
+      description: pets.pet_1_description,
+      skills: pets.pet_1_skill,
+      expire: pets.pet_1_date_expire,
+    },
+    {
+      name: pets.pet_2_name,
+      nickname: pets.pet_2_nickname,
+      icon: pets.pet_2_icon,
+      description: pets.pet_2_description,
+      skills: pets.pet_2_skill,
+      expire: pets.pet_2_date_expire,
+    },
+    {
+      name: pets.pet_3_name,
+      nickname: pets.pet_3_nickname,
+      icon: pets.pet_3_icon,
+      description: pets.pet_3_description,
+      skills: pets.pet_3_skill,
+      expire: pets.pet_3_date_expire,
+    },
+  ].filter((pet) => pet.name);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-lg font-semibold text-foreground">寵物資訊</h3>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {entries.map((pet, index) => (
+          <div
+            key={`${pet.name}-${index}`}
+            className="flex flex-col gap-3 rounded-xl border border-border bg-background/80 p-4"
+          >
+            <div className="flex items-start gap-3">
+              {pet.icon && (
+                <img
+                  src={pet.icon}
+                  alt={pet.name ?? ""}
+                  className="h-12 w-12 rounded border border-border bg-muted object-contain"
+                  loading="lazy"
+                />
+              )}
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {pet.name}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {pet.nickname ?? "—"}
+                </p>
+              </div>
+            </div>
+            {pet.description && (
+              <p className="text-xs text-muted-foreground">
+                {pet.description}
+              </p>
+            )}
+            {pet.expire && (
+              <p className="text-[11px] text-muted-foreground">
+                到期日：{pet.expire}
+              </p>
+            )}
+            {pet.skills && pet.skills.length > 0 && (
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {pet.skills.map((skill) => (
+                  <li key={`${pet.name}-${skill}`}>{skill}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SkillsSection({
+  section,
+  errors,
+  isLoading,
+  loadingModules,
+  onRefetchModule,
+}: {
+  section: SkillsSectionData;
+  errors: Record<string, string>;
+  isLoading: boolean;
+  loadingModules?: Partial<Record<SkillModuleKey, boolean>>;
+  onRefetchModule?: (module: SkillModuleKey) => void;
+}) {
+  const moduleErrors = {
+    skillSets: errors["skills.skillSets"],
+    linkSkills: errors["skills.linkSkills"],
+    vmatrix: errors["skills.vmatrix"],
+    hexamatrix: errors["skills.hexamatrix"],
+    hexamatrixStat: errors["skills.hexamatrixStat"],
+  };
+
+  const getModuleLoading = (module: SkillModuleKey, hasData: boolean) =>
+    Boolean(loadingModules?.[module]) || (isLoading && !hasData);
+
+  const handleRefetch =
+    onRefetchModule !== undefined
+      ? (module: SkillModuleKey) => onRefetchModule(module)
+      : undefined;
+
+  const skillSets = section.skillSets ?? [];
+  const hasSkillSets = skillSets.length > 0;
+  const skillSetsLoading = getModuleLoading("skillSets", hasSkillSets);
+
+  const linkSkillsLoading = getModuleLoading(
+    "linkSkills",
+    Boolean(section.linkSkills?.character_link_skill?.length)
+  );
+  const vmatrixLoading = getModuleLoading(
+    "vmatrix",
+    Boolean(
+      section.vmatrix?.character_v_core_equipment?.length ||
+        section.vmatrix?.character_v_matrix_core?.length
+    )
+  );
+  const hexamatrixLoading = getModuleLoading(
+    "hexamatrix",
+    Boolean(section.hexamatrix?.character_hexa_core_equipment?.length)
+  );
+  const hexamatrixStatLoading = getModuleLoading(
+    "hexamatrixStat",
+    Boolean(section.hexamatrixStat?.character_hexa_stat_core?.length)
+  );
+
+  return (
+    <div className="space-y-8">
+      <section className="space-y-3">
+        <header className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">職業技能</h3>
+          {handleRefetch && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => handleRefetch("skillSets")}
+              disabled={skillSetsLoading}
+              aria-label="重新整理職業技能"
+            >
+              {skillSetsLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+        </header>
+        {moduleErrors.skillSets && (
+          <SectionRetryBanner
+            message={moduleErrors.skillSets}
+            onRetry={
+              handleRefetch ? () => handleRefetch("skillSets") : () => {}
+            }
+            isRetrying={skillSetsLoading}
+          />
+        )}
+        {hasSkillSets ? (
+          <div className="space-y-6">
+            {skillSets.map((set) => (
+              <SkillGroup key={set.character_skill_grade} skillSet={set} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {skillSetsLoading ? "資料載入中…" : "目前沒有技能資料。"}
+          </p>
+        )}
+      </section>
+
+      <LinkSkillSection
+        linkSkills={section.linkSkills ?? null}
+        errorMessage={moduleErrors.linkSkills}
+        onRefetch={
+          handleRefetch ? () => handleRefetch("linkSkills") : undefined
+        }
+        isModuleLoading={linkSkillsLoading}
+      />
+      <VMatrixSection
+        vmatrix={section.vmatrix ?? null}
+        errorMessage={moduleErrors.vmatrix}
+        onRefetch={handleRefetch ? () => handleRefetch("vmatrix") : undefined}
+        isModuleLoading={vmatrixLoading}
+      />
+      <HexaMatrixSection
+        hexamatrix={section.hexamatrix ?? null}
+        errorMessage={moduleErrors.hexamatrix}
+        onRefetch={
+          handleRefetch ? () => handleRefetch("hexamatrix") : undefined
+        }
+        isModuleLoading={hexamatrixLoading}
+      />
+      <HexaStatSection
+        hexamatrixStat={section.hexamatrixStat ?? null}
+        errorMessage={moduleErrors.hexamatrixStat}
+        onRefetch={
+          handleRefetch ? () => handleRefetch("hexamatrixStat") : undefined
+        }
+        isModuleLoading={hexamatrixStatLoading}
+      />
     </div>
   );
 }
@@ -968,6 +1981,390 @@ function SkillGroup({ skillSet }: { skillSet: MapleCharacterSkillSet }) {
       )}
     </section>
   );
+}
+
+function LinkSkillSection({
+  linkSkills,
+  errorMessage,
+  onRefetch,
+  isModuleLoading,
+}: {
+  linkSkills: MapleCharacterLinkSkill | null;
+  errorMessage?: string;
+  onRefetch?: () => void;
+  isModuleLoading: boolean;
+}) {
+  const entries = linkSkills?.character_link_skill ?? [];
+
+  if (!errorMessage && entries.length === 0 && !isModuleLoading) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">連結技能</h3>
+          {linkSkills?.date && (
+            <p className="text-xs text-muted-foreground">
+              資料日期：{linkSkills.date}
+            </p>
+          )}
+        </div>
+        {onRefetch && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRefetch}
+            disabled={isModuleLoading}
+            aria-label="重新整理連結技能"
+          >
+            {isModuleLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+      </header>
+      {errorMessage && (
+        <SectionRetryBanner
+          message={errorMessage}
+          onRetry={onRefetch ?? (() => {})}
+          isRetrying={isModuleLoading}
+        />
+      )}
+      {entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isModuleLoading ? "資料載入中…" : "目前沒有連結技能資料。"}
+        </p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {entries.map((skill) => (
+            <article
+              key={`${skill.skill_name}-${skill.skill_level}`}
+              className="flex gap-3 rounded-xl border border-border bg-background/90 p-4"
+            >
+              {skill.skill_icon && (
+                <img
+                  src={skill.skill_icon}
+                  alt={skill.skill_name}
+                  className="h-12 w-12 flex-shrink-0 rounded border border-border bg-muted object-contain"
+                  loading="lazy"
+                />
+              )}
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-foreground">
+                  {skill.skill_name}
+                </p>
+                <p className="text-xs text-primary">
+                  Lv. {skill.skill_level ?? "-"}
+                </p>
+                {skill.skill_effect && (
+                  <p className="text-xs text-muted-foreground whitespace-pre-line">
+                    {skill.skill_effect}
+                  </p>
+                )}
+                {!skill.skill_effect && skill.skill_description && (
+                  <p className="text-xs text-muted-foreground whitespace-pre-line">
+                    {skill.skill_description}
+                  </p>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function VMatrixSection({
+  vmatrix,
+  errorMessage,
+  onRefetch,
+  isModuleLoading,
+}: {
+  vmatrix: MapleCharacterVMatrix | null;
+  errorMessage?: string;
+  onRefetch?: () => void;
+  isModuleLoading: boolean;
+}) {
+  const slots = vmatrix?.character_v_core_equipment ?? [];
+  const cores = vmatrix?.character_v_matrix_core ?? [];
+
+  if (!errorMessage && slots.length === 0 && cores.length === 0 && !isModuleLoading) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">V 矩陣</h3>
+          {vmatrix?.date && (
+            <p className="text-xs text-muted-foreground">
+              資料日期：{vmatrix.date}
+            </p>
+          )}
+        </div>
+        {onRefetch && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRefetch}
+            disabled={isModuleLoading}
+            aria-label="重新整理 V 矩陣"
+          >
+            {isModuleLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+      </header>
+      {errorMessage && (
+        <SectionRetryBanner
+          message={errorMessage}
+          onRetry={onRefetch ?? (() => {})}
+          isRetrying={isModuleLoading}
+        />
+      )}
+      {slots.length === 0 && cores.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isModuleLoading ? "資料載入中…" : "目前沒有 V 矩陣資料。"}
+        </p>
+      ) : (
+        <>
+          {slots.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                核心欄位
+              </p>
+              <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                {slots.map((slot) => (
+                  <li
+                    key={`${slot.slot_id}-${slot.slot_core_name}`}
+                    className="rounded border border-border/60 bg-background px-3 py-2"
+                  >
+                    <p className="font-semibold text-foreground">
+                      {slot.slot_core_name ?? "未設定"}
+                    </p>
+                    <p>
+                      等級：{slot.slot_level ?? "-"} ｜ 類型：{slot.slot_type ?? "-"}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {cores.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-border bg-background/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                核心清單
+              </p>
+              <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                {cores.map((core) => (
+                  <li
+                    key={`${core.core_name}-${core.core_level}`}
+                    className="rounded border border-border/60 bg-background px-3 py-2"
+                  >
+                    <p className="font-semibold text-foreground">
+                      {core.core_name}
+                    </p>
+                    <p>等級：{core.core_level ?? "-"}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function HexaMatrixSection({
+  hexamatrix,
+  errorMessage,
+  onRefetch,
+  isModuleLoading,
+}: {
+  hexamatrix: MapleCharacterHexaMatrix | null;
+  errorMessage?: string;
+  onRefetch?: () => void;
+  isModuleLoading: boolean;
+}) {
+  const cores = hexamatrix?.character_hexa_core_equipment ?? [];
+
+  if (!errorMessage && cores.length === 0 && !isModuleLoading) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">HEXA 核心</h3>
+          {hexamatrix?.date && (
+            <p className="text-xs text-muted-foreground">
+              資料日期：{hexamatrix.date}
+            </p>
+          )}
+        </div>
+        {onRefetch && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRefetch}
+            disabled={isModuleLoading}
+            aria-label="重新整理 HEXA 核心"
+          >
+            {isModuleLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+      </header>
+      {errorMessage && (
+        <SectionRetryBanner
+          message={errorMessage}
+          onRetry={onRefetch ?? (() => {})}
+          isRetrying={isModuleLoading}
+        />
+      )}
+      {cores.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isModuleLoading ? "資料載入中…" : "目前沒有 HEXA 核心資料。"}
+        </p>
+      ) : (
+        <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+          {cores.map((core) => (
+            <li
+              key={`${core.node_name}-${core.node_level}`}
+              className="rounded border border-border/60 bg-background px-3 py-2"
+            >
+              <p className="font-semibold text-foreground">{core.node_name}</p>
+              <p>等級：{core.node_level ?? "-"}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function HexaStatSection({
+  hexamatrixStat,
+  errorMessage,
+  onRefetch,
+  isModuleLoading,
+}: {
+  hexamatrixStat: MapleCharacterHexaMatrixStat | null;
+  errorMessage?: string;
+  onRefetch?: () => void;
+  isModuleLoading: boolean;
+}) {
+  const stats = hexamatrixStat?.character_hexa_stat_core ?? [];
+
+  if (!errorMessage && stats.length === 0 && !isModuleLoading) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">HEXA 屬性</h3>
+          {hexamatrixStat?.date && (
+            <p className="text-xs text-muted-foreground">
+              資料日期：{hexamatrixStat.date}
+            </p>
+          )}
+        </div>
+        {onRefetch && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRefetch}
+            disabled={isModuleLoading}
+            aria-label="重新整理 HEXA 屬性"
+          >
+            {isModuleLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+      </header>
+      {errorMessage && (
+        <SectionRetryBanner
+          message={errorMessage}
+          onRetry={onRefetch ?? (() => {})}
+          isRetrying={isModuleLoading}
+        />
+      )}
+      {stats.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isModuleLoading ? "資料載入中…" : "目前沒有 HEXA 屬性資料。"}
+        </p>
+      ) : (
+        <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+          {stats.map((entry) => (
+            <li
+              key={`${entry.stat_name}-${entry.stat_level}`}
+              className="rounded border border-border/60 bg-background px-3 py-2"
+            >
+              <p className="font-semibold text-foreground">{entry.stat_name}</p>
+              <p>
+                等級：{entry.stat_level ?? "-"} ｜ 強化：
+                {entry.stat_level_increase ?? "-"}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function formatPotential(item: MapleEquipmentItem): string {
+  const options = [
+    item.potential_option_1,
+    item.potential_option_2,
+    item.potential_option_3,
+  ].filter(Boolean);
+
+  if (options.length === 0) {
+    return item.potential_option_grade ?? "—";
+  }
+
+  return [`${item.potential_option_grade ?? "潛能"}`, ...options].join("\n");
+}
+
+function formatAdditionalPotential(item: MapleEquipmentItem): string {
+  const options = [
+    item.additional_potential_option_1,
+    item.additional_potential_option_2,
+    item.additional_potential_option_3,
+  ].filter(Boolean);
+
+  if (options.length === 0) {
+    return item.additional_potential_option_grade ?? "—";
+  }
+
+  return [
+    `${item.additional_potential_option_grade ?? "附加潛能"}`,
+    ...options,
+  ].join("\n");
 }
 
 function translateSkillGrade(grade: string): string {
