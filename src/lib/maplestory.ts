@@ -67,21 +67,6 @@ export interface MapleUserUnion {
   union_artifact_point: number;
 }
 
-export interface MapleCharacterSkill {
-  skill_name: string;
-  skill_description?: string;
-  skill_level?: number;
-  skill_effect?: string;
-  skill_icon?: string;
-}
-
-export interface MapleCharacterSkillSet {
-  date?: string;
-  character_class?: string;
-  character_skill_grade: string;
-  character_skill: MapleCharacterSkill[];
-}
-
 export interface MapleCharacterPopularity {
   date?: string;
   popularity?: number;
@@ -365,10 +350,17 @@ export interface MapleCharacterLinkSkill {
 }
 
 export interface MapleVMatrixCoreSlot {
-  slot_id?: number;
+  slot_id?: string | number;
   slot_level?: number;
-  slot_type?: string;
+  v_core_name?: string;
+  v_core_type?: string;
+  v_core_level?: number;
+  v_core_skill_1?: string | null;
+  v_core_skill_2?: string | null;
+  v_core_skill_3?: string | null;
+  v_core_icon?: string;
   slot_core_name?: string;
+  slot_type?: string;
   slot_core_icon?: string;
 }
 
@@ -384,36 +376,50 @@ export interface MapleVMatrixCore {
 }
 
 export interface MapleCharacterVMatrix {
-  date?: string;
+  date?: string | null;
   character_class?: string;
   character_v_core_equipment?: MapleVMatrixCoreSlot[];
   character_v_matrix_core?: MapleVMatrixCore[];
+  character_v_matrix_remain_slot_upgrade_point?: number;
 }
 
 export interface MapleHexaMatrixStat {
-  stat_name?: string;
-  stat_level?: number;
-  stat_level_increase?: string;
-  stat_stage?: number;
+  slot_id?: string;
+  main_stat_name?: string;
+  sub_stat_name_1?: string;
+  sub_stat_name_2?: string;
+  main_stat_level?: number;
+  sub_stat_level_1?: number;
+  sub_stat_level_2?: number;
+  stat_grade?: number;
+}
+
+export interface MapleHexaLinkedSkill {
+  hexa_skill_id?: string;
 }
 
 export interface MapleHexaCoreNode {
-  node_name?: string;
-  node_level?: number;
-  node_type?: string;
-  node_icon?: string;
+  hexa_core_name?: string;
+  hexa_core_level?: number;
+  hexa_core_type?: string;
+  linked_skill?: MapleHexaLinkedSkill[];
 }
 
 export interface MapleCharacterHexaMatrix {
-  date?: string;
+  date?: string | null;
   character_class?: string;
   character_hexa_core_equipment?: MapleHexaCoreNode[];
 }
 
 export interface MapleCharacterHexaMatrixStat {
-  date?: string;
+  date?: string | null;
   character_class?: string;
   character_hexa_stat_core?: MapleHexaMatrixStat[];
+  character_hexa_stat_core_2?: MapleHexaMatrixStat[];
+  character_hexa_stat_core_3?: MapleHexaMatrixStat[];
+  preset_hexa_stat_core?: MapleHexaMatrixStat[];
+  preset_hexa_stat_core_2?: MapleHexaMatrixStat[];
+  preset_hexa_stat_core_3?: MapleHexaMatrixStat[];
 }
 
 export interface MapleCharacterDojangFloor {
@@ -463,7 +469,6 @@ export interface CharacterSectionMap {
     pets?: MapleCharacterPetEquipment | null;
   };
   skills?: {
-    skillSets?: MapleCharacterSkillSet[];
     linkSkills?: MapleCharacterLinkSkill | null;
     vmatrix?: MapleCharacterVMatrix | null;
     hexamatrix?: MapleCharacterHexaMatrix | null;
@@ -474,7 +479,6 @@ export interface CharacterSectionMap {
 }
 
 export const SKILL_MODULE_KEYS = [
-  "skillSets",
   "linkSkills",
   "vmatrix",
   "hexamatrix",
@@ -507,18 +511,6 @@ export class MapleStoryAPIError extends Error {
     this.details = details;
   }
 }
-
-const SKILL_GRADES = [
-  "0",
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "hyperpassive",
-  "hyperactive",
-];
 
 const OPTIONAL_EMPTY_STATUS_CODES = new Set<number>([204, 404]);
 
@@ -570,18 +562,6 @@ async function fetchSkillsModules(
 
   for (const module of modules) {
     switch (module) {
-      case "skillSets":
-        try {
-          data.skillSets = await fetchSkills(ocid, date);
-        } catch (error) {
-          if (isOptionalModuleError(error)) {
-            data.skillSets = [];
-          } else {
-            recordError(module, error);
-            data.skillSets = [];
-          }
-        }
-        break;
       case "linkSkills":
         data.linkSkills = await fetchOptionalSection<MapleCharacterLinkSkill>(
           "/character/link-skill",
@@ -1087,37 +1067,6 @@ export async function fetchCharacterSkillModule(
     },
     errors,
   };
-}
-
-async function fetchSkills(
-  ocid: string,
-  date?: string
-): Promise<MapleCharacterSkillSet[]> {
-  const results = await Promise.allSettled(
-    SKILL_GRADES.map((grade) =>
-      fetchFromApi<MapleCharacterSkillSet>("/character/skill", {
-        ocid,
-        date,
-        character_skill_grade: grade,
-      })
-    )
-  );
-
-  const skillSets: MapleCharacterSkillSet[] = [];
-
-  results.forEach((result) => {
-    if (result.status === "fulfilled") {
-      skillSets.push(result.value);
-    } else if (result.reason instanceof MapleStoryAPIError) {
-      const status = result.reason.status;
-      if (!status || OPTIONAL_EMPTY_STATUS_CODES.has(status)) {
-        return;
-      }
-      throw result.reason;
-    }
-  });
-
-  return skillSets.filter((skillSet) => skillSet.character_skill.length > 0);
 }
 
 function normalizeErrorMessage(error: unknown): string {

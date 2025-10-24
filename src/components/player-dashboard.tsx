@@ -37,7 +37,6 @@ import type {
   CharacterSectionMap,
   CharacterSectionKey,
   MapleCharacterEquipment,
-  MapleCharacterSkillSet,
   MapleUserUnion,
   MapleEquipmentItem,
   MapleStatEntry,
@@ -247,7 +246,9 @@ export function PlayerDashboard() {
         </Alert>
       )}
 
-      {characterQuery.isFetching && !characterQuery.data && <SearchLoadingState />}
+      {characterQuery.isFetching && !characterQuery.data && (
+        <SearchLoadingState />
+      )}
 
       {characterQuery.data && (
         <PlayerProfile
@@ -347,18 +348,18 @@ function doesErrorBelongToSkillModule(
 
 function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
   const [sections, setSections] = useState(data.sections);
-  const [sectionErrors, setSectionErrors] = useState<CharacterDetailsResponse["errors"]>(
-    data.errors
-  );
+  const [sectionErrors, setSectionErrors] = useState<
+    CharacterDetailsResponse["errors"]
+  >(data.errors);
   const [fetchedAt, setFetchedAt] = useState(data.fetchedAt);
   const queryClient = useQueryClient();
   const queryKey = useMemo(
     () =>
-      ([
+      [
         "characterDetails",
         data.characterName,
         data.requestedDate ?? null,
-      ] as const),
+      ] as const,
     [data.characterName, data.requestedDate]
   );
 
@@ -399,8 +400,9 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
     });
   }, [tabs]);
 
-  const [loadingSections, setLoadingSections] =
-    useState<Partial<Record<CharacterSectionKey, boolean>>>({});
+  const [loadingSections, setLoadingSections] = useState<
+    Partial<Record<CharacterSectionKey, boolean>>
+  >({});
   const [loadingSkillModules, setLoadingSkillModules] = useState<
     Partial<Record<SkillModuleKey, boolean>>
   >({});
@@ -579,7 +581,8 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
           return response;
         }
 
-        const cachedSkills = (cached.sections.skills ?? {}) as SkillsSectionData;
+        const cachedSkills = (cached.sections.skills ??
+          {}) as SkillsSectionData;
 
         const updatedErrors = (() => {
           const remaining = cached.errors.filter(
@@ -648,12 +651,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         ocid: data.ocid,
       });
     },
-    [
-      data.characterName,
-      mutateSection,
-      requestedDate,
-      data.ocid,
-    ]
+    [data.characterName, mutateSection, requestedDate, data.ocid]
   );
 
   useEffect(() => {
@@ -751,9 +749,7 @@ function PlayerProfile({ data, isLoading }: PlayerProfileProps) {
         <CardContent className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 sm:text-xs">
           <span className="break-all font-mono">OCID：{data.ocid}</span>
           {basicProfile?.date && (
-            <span className="font-mono">
-              基礎資料時間：{basicProfile.date}
-            </span>
+            <span className="font-mono">基礎資料時間：{basicProfile.date}</span>
           )}
         </CardContent>
       </Card>
@@ -864,7 +860,9 @@ function SectionBody({
     case "equipment":
       if (sections.equipment) {
         return (
-          <EquipmentSection section={sections.equipment as EquipmentSectionData} />
+          <EquipmentSection
+            section={sections.equipment as EquipmentSectionData}
+          />
         );
       }
       break;
@@ -971,9 +969,7 @@ function DojangSection({
   return (
     <section className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
       <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-lg font-semibold text-foreground">
-          武陵道場紀錄
-        </h3>
+        <h3 className="text-lg font-semibold text-foreground">武陵道場紀錄</h3>
         {dojang.date && (
           <p className="text-xs text-muted-foreground">
             資料日期：{dojang.date}
@@ -1060,20 +1056,23 @@ function StatsSection({ section }: { section: StatSectionData }) {
       {section.overview && hasOverview && (
         <section className="space-y-4">
           <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <h3 className="text-lg font-semibold text-foreground">最終能力值</h3>
+            <h3 className="text-lg font-semibold text-foreground">
+              最終能力值
+            </h3>
             {section.overview.date && (
               <p className="text-xs text-muted-foreground">
                 資料日期：{section.overview.date}
               </p>
             )}
           </header>
-          {section.overview.final_stat && section.overview.final_stat.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {section.overview.final_stat.map((entry) => (
-                <StatCard key={entry.stat_name} entry={entry} />
-              ))}
-            </div>
-          )}
+          {section.overview.final_stat &&
+            section.overview.final_stat.length > 0 && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {section.overview.final_stat.map((entry) => (
+                  <StatCard key={entry.stat_name} entry={entry} />
+                ))}
+              </div>
+            )}
           <div className="grid gap-4 sm:grid-cols-2">
             <InfoTile label="剩餘 AP" value={section.overview.remain_ap} />
             <InfoTile
@@ -1095,11 +1094,23 @@ function StatsSection({ section }: { section: StatSectionData }) {
             )}
           </header>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <InfoTile label="領導力" value={section.propensity.charisma_level} />
-            <InfoTile label="感性" value={section.propensity.sensibility_level} />
+            <InfoTile
+              label="領導力"
+              value={section.propensity.charisma_level}
+            />
+            <InfoTile
+              label="感性"
+              value={section.propensity.sensibility_level}
+            />
             <InfoTile label="洞察力" value={section.propensity.insight_level} />
-            <InfoTile label="意志" value={section.propensity.willingness_level} />
-            <InfoTile label="手藝" value={section.propensity.handicraft_level} />
+            <InfoTile
+              label="意志"
+              value={section.propensity.willingness_level}
+            />
+            <InfoTile
+              label="手藝"
+              value={section.propensity.handicraft_level}
+            />
             <InfoTile label="魅力" value={section.propensity.charm_level} />
           </div>
         </section>
@@ -1302,11 +1313,7 @@ function AbilitySection({
   );
 }
 
-function EquipmentSection({
-  section,
-}: {
-  section: EquipmentSectionData;
-}) {
+function EquipmentSection({ section }: { section: EquipmentSectionData }) {
   const hasGear = Boolean(section.gear?.item_equipment?.length);
   const hasCash = Boolean(section.cash?.cash_item_equipment_base?.length);
   const hasSymbols = Boolean(section.symbols?.symbol?.length);
@@ -1439,11 +1446,7 @@ function EquipmentStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CashEquipmentSection({
-  cash,
-}: {
-  cash: MapleCharacterCashEquipment;
-}) {
+function CashEquipmentSection({ cash }: { cash: MapleCharacterCashEquipment }) {
   const items = cash.cash_item_equipment_base ?? [];
 
   if (items.length === 0) {
@@ -1542,7 +1545,8 @@ function SymbolSection({
                   {symbol.symbol_name}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Lv. {symbol.symbol_level ?? "-"} ｜ 成長值 {symbol.symbol_growth_count ?? 0}/
+                  Lv. {symbol.symbol_level ?? "-"} ｜ 成長值{" "}
+                  {symbol.symbol_growth_count ?? 0}/
                   {symbol.symbol_require_growth_count ?? 0}
                 </p>
               </div>
@@ -1614,11 +1618,7 @@ function SetEffectSection({
   );
 }
 
-function BeautySection({
-  beauty,
-}: {
-  beauty: MapleCharacterBeautyEquipment;
-}) {
+function BeautySection({ beauty }: { beauty: MapleCharacterBeautyEquipment }) {
   const hasData =
     Boolean(beauty.character_hair) ||
     Boolean(beauty.character_face) ||
@@ -1766,9 +1766,7 @@ function PetSection({ pets }: { pets: MapleCharacterPetEquipment }) {
               </div>
             </div>
             {pet.description && (
-              <p className="text-xs text-muted-foreground">
-                {pet.description}
-              </p>
+              <p className="text-xs text-muted-foreground">{pet.description}</p>
             )}
             {pet.expire && (
               <p className="text-[11px] text-muted-foreground">
@@ -1803,7 +1801,6 @@ function SkillsSection({
   onRefetchModule?: (module: SkillModuleKey) => void;
 }) {
   const moduleErrors = {
-    skillSets: errors["skills.skillSets"],
     linkSkills: errors["skills.linkSkills"],
     vmatrix: errors["skills.vmatrix"],
     hexamatrix: errors["skills.hexamatrix"],
@@ -1817,10 +1814,6 @@ function SkillsSection({
     onRefetchModule !== undefined
       ? (module: SkillModuleKey) => onRefetchModule(module)
       : undefined;
-
-  const skillSets = section.skillSets ?? [];
-  const hasSkillSets = skillSets.length > 0;
-  const skillSetsLoading = getModuleLoading("skillSets", hasSkillSets);
 
   const linkSkillsLoading = getModuleLoading(
     "linkSkills",
@@ -1844,48 +1837,6 @@ function SkillsSection({
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
-        <header className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">職業技能</h3>
-          {handleRefetch && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => handleRefetch("skillSets")}
-              disabled={skillSetsLoading}
-              aria-label="重新整理職業技能"
-            >
-              {skillSetsLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-        </header>
-        {moduleErrors.skillSets && (
-          <SectionRetryBanner
-            message={moduleErrors.skillSets}
-            onRetry={
-              handleRefetch ? () => handleRefetch("skillSets") : () => {}
-            }
-            isRetrying={skillSetsLoading}
-          />
-        )}
-        {hasSkillSets ? (
-          <div className="space-y-6">
-            {skillSets.map((set) => (
-              <SkillGroup key={set.character_skill_grade} skillSet={set} />
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {skillSetsLoading ? "資料載入中…" : "目前沒有技能資料。"}
-          </p>
-        )}
-      </section>
-
       <LinkSkillSection
         linkSkills={section.linkSkills ?? null}
         errorMessage={moduleErrors.linkSkills}
@@ -1917,69 +1868,6 @@ function SkillsSection({
         isModuleLoading={hexamatrixStatLoading}
       />
     </div>
-  );
-}
-
-function SkillGroup({ skillSet }: { skillSet: MapleCharacterSkillSet }) {
-  return (
-    <section className="space-y-3">
-      <header className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-foreground">
-            {translateSkillGrade(skillSet.character_skill_grade)}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {skillSet.character_class}
-          </p>
-        </div>
-        {skillSet.date && (
-          <p className="text-xs text-muted-foreground">
-            更新時間：{skillSet.date}
-          </p>
-        )}
-      </header>
-      {skillSet.character_skill.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          這個階段沒有已學習的技能。
-        </p>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {skillSet.character_skill.map((skill) => (
-            <article
-              key={`${skill.skill_name}-${skill.skill_level}`}
-              className="flex gap-3 rounded-xl border border-border bg-background/90 p-4"
-            >
-              {skill.skill_icon && (
-                <img
-                  src={skill.skill_icon}
-                  alt={skill.skill_name}
-                  className="h-12 w-12 flex-shrink-0 rounded border border-border bg-muted object-contain"
-                  loading="lazy"
-                />
-              )}
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-foreground">
-                  {skill.skill_name}
-                </p>
-                <p className="text-xs text-primary">
-                  Lv. {skill.skill_level ?? "-"}
-                </p>
-                {skill.skill_effect && (
-                  <p className="text-xs text-muted-foreground whitespace-pre-line">
-                    {skill.skill_effect}
-                  </p>
-                )}
-                {!skill.skill_effect && skill.skill_description && (
-                  <p className="text-xs text-muted-foreground whitespace-pre-line">
-                    {skill.skill_description}
-                  </p>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -2093,8 +1981,15 @@ function VMatrixSection({
 }) {
   const slots = vmatrix?.character_v_core_equipment ?? [];
   const cores = vmatrix?.character_v_matrix_core ?? [];
+  const remainingSlotPoints =
+    vmatrix?.character_v_matrix_remain_slot_upgrade_point;
 
-  if (!errorMessage && slots.length === 0 && cores.length === 0 && !isModuleLoading) {
+  if (
+    !errorMessage &&
+    slots.length === 0 &&
+    cores.length === 0 &&
+    !isModuleLoading
+  ) {
     return null;
   }
 
@@ -2106,6 +2001,11 @@ function VMatrixSection({
           {vmatrix?.date && (
             <p className="text-xs text-muted-foreground">
               資料日期：{vmatrix.date}
+            </p>
+          )}
+          {typeof remainingSlotPoints === "number" && (
+            <p className="text-xs text-muted-foreground">
+              剩餘欄位強化點數：{remainingSlotPoints}
             </p>
           )}
         </div>
@@ -2145,19 +2045,40 @@ function VMatrixSection({
                 核心欄位
               </p>
               <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
-                {slots.map((slot) => (
-                  <li
-                    key={`${slot.slot_id}-${slot.slot_core_name}`}
-                    className="rounded border border-border/60 bg-background px-3 py-2"
-                  >
-                    <p className="font-semibold text-foreground">
-                      {slot.slot_core_name ?? "未設定"}
-                    </p>
-                    <p>
-                      等級：{slot.slot_level ?? "-"} ｜ 類型：{slot.slot_type ?? "-"}
-                    </p>
-                  </li>
-                ))}
+                {slots.map((slot, index) => {
+                  const enhancedSkills = [
+                    slot.v_core_skill_1,
+                    slot.v_core_skill_2,
+                    slot.v_core_skill_3,
+                  ].filter(
+                    (skill): skill is string => Boolean(skill && skill.trim())
+                  );
+
+                  return (
+                    <li
+                      key={`vmatrix-slot-${slot.slot_id ?? slot.v_core_name ?? slot.slot_core_name ?? index}`}
+                      className="rounded border border-border/60 bg-background px-3 py-2"
+                    >
+                      <p className="font-semibold text-foreground">
+                        {slot.v_core_name ?? slot.slot_core_name ?? "未設定"}
+                      </p>
+                      <p>
+                        核心等級：{slot.v_core_level ?? "-"} ｜ 欄位等級：
+                        {slot.slot_level ?? "-"}
+                      </p>
+                      <p>
+                        類型：{slot.v_core_type ?? slot.slot_type ?? "-"} ｜ 欄位
+                        ID：{slot.slot_id ?? "-"}
+                      </p>
+                      {enhancedSkills.length > 0 && (
+                        <p>
+                          強化技能：
+                          {enhancedSkills.join(" ‧ ")}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -2199,6 +2120,7 @@ function HexaMatrixSection({
   isModuleLoading: boolean;
 }) {
   const cores = hexamatrix?.character_hexa_core_equipment ?? [];
+  console.log("cores", cores);
 
   if (!errorMessage && cores.length === 0 && !isModuleLoading) {
     return null;
@@ -2247,11 +2169,26 @@ function HexaMatrixSection({
         <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
           {cores.map((core) => (
             <li
-              key={`${core.node_name}-${core.node_level}`}
+              key={`${core.hexa_core_name ?? "unknown"}-${
+                core.hexa_core_level ?? "unknown"
+              }`}
               className="rounded border border-border/60 bg-background px-3 py-2"
             >
-              <p className="font-semibold text-foreground">{core.node_name}</p>
-              <p>等級：{core.node_level ?? "-"}</p>
+              <p className="font-semibold text-foreground">
+                {core.hexa_core_name ?? "未設定"}
+              </p>
+              <p>
+                等級：{core.hexa_core_level ?? "-"} ｜ 類型：
+                {core.hexa_core_type ?? "-"}
+              </p>
+              {core.linked_skill?.length ? (
+                <p>
+                  連結技能：
+                  {core.linked_skill
+                    .map((skill) => skill.hexa_skill_id ?? "-")
+                    .join("、")}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -2271,9 +2208,36 @@ function HexaStatSection({
   onRefetch?: () => void;
   isModuleLoading: boolean;
 }) {
-  const stats = hexamatrixStat?.character_hexa_stat_core ?? [];
+  const statGroups = [
+    {
+      label: "核心屬性 1",
+      entries: hexamatrixStat?.character_hexa_stat_core ?? [],
+    },
+    {
+      label: "核心屬性 2",
+      entries: hexamatrixStat?.character_hexa_stat_core_2 ?? [],
+    },
+    {
+      label: "核心屬性 3",
+      entries: hexamatrixStat?.character_hexa_stat_core_3 ?? [],
+    },
+    {
+      label: "預設 1",
+      entries: hexamatrixStat?.preset_hexa_stat_core ?? [],
+    },
+    {
+      label: "預設 2",
+      entries: hexamatrixStat?.preset_hexa_stat_core_2 ?? [],
+    },
+    {
+      label: "預設 3",
+      entries: hexamatrixStat?.preset_hexa_stat_core_3 ?? [],
+    },
+  ].filter((group) => group.entries.length > 0);
 
-  if (!errorMessage && stats.length === 0 && !isModuleLoading) {
+  const hasStats = statGroups.length > 0;
+
+  if (!errorMessage && !hasStats && !isModuleLoading) {
     return null;
   }
 
@@ -2312,25 +2276,61 @@ function HexaStatSection({
           isRetrying={isModuleLoading}
         />
       )}
-      {stats.length === 0 ? (
+      {!hasStats ? (
         <p className="text-sm text-muted-foreground">
           {isModuleLoading ? "資料載入中…" : "目前沒有 HEXA 屬性資料。"}
         </p>
       ) : (
-        <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
-          {stats.map((entry) => (
-            <li
-              key={`${entry.stat_name}-${entry.stat_level}`}
-              className="rounded border border-border/60 bg-background px-3 py-2"
-            >
-              <p className="font-semibold text-foreground">{entry.stat_name}</p>
-              <p>
-                等級：{entry.stat_level ?? "-"} ｜ 強化：
-                {entry.stat_level_increase ?? "-"}
-              </p>
-            </li>
+        <div className="space-y-4">
+          {statGroups.map((group) => (
+            <div key={group.label} className="space-y-2">
+              <h4 className="text-sm font-semibold text-foreground">
+                {group.label}
+              </h4>
+              <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                {group.entries.map((entry, index) => {
+                  const keyParts = [
+                    entry.slot_id,
+                    entry.main_stat_name,
+                    entry.main_stat_level,
+                  ]
+                    .filter(Boolean)
+                    .join("-");
+
+                  const entryKey =
+                    keyParts.length > 0
+                      ? `${group.label}-${keyParts}`
+                      : `${group.label}-${index}`;
+
+                  return (
+                    <li
+                      key={entryKey}
+                      className="rounded border border-border/60 bg-background px-3 py-2"
+                    >
+                      <p className="font-semibold text-foreground">
+                        {entry.main_stat_name ?? "-"}
+                      </p>
+                      <p>槽位：{entry.slot_id ?? "-"}</p>
+                      <p>
+                        主屬性等級：
+                        {entry.main_stat_level ?? "-"}
+                      </p>
+                      <p>
+                        {entry.sub_stat_name_1 ?? "副屬性 1"}：等級{" "}
+                        {entry.sub_stat_level_1 ?? "-"}
+                      </p>
+                      <p>
+                        {entry.sub_stat_name_2 ?? "副屬性 2"}：等級{" "}
+                        {entry.sub_stat_level_2 ?? "-"}
+                      </p>
+                      <p>評級：{entry.stat_grade ?? "-"}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </section>
   );
@@ -2365,22 +2365,6 @@ function formatAdditionalPotential(item: MapleEquipmentItem): string {
     `${item.additional_potential_option_grade ?? "附加潛能"}`,
     ...options,
   ].join("\n");
-}
-
-function translateSkillGrade(grade: string): string {
-  const mapping: Record<string, string> = {
-    "0": "初心者",
-    "1": "一轉技能",
-    "2": "二轉技能",
-    "3": "三轉技能",
-    "4": "四轉技能",
-    "5": "五轉技能",
-    "6": "六轉技能",
-    hyperpassive: "超技能力（被動）",
-    hyperactive: "超技能力（主動）",
-  };
-
-  return mapping[grade] ?? grade;
 }
 
 function UnionSection({ union }: { union: MapleUserUnion }) {
